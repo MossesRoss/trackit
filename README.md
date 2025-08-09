@@ -1,2 +1,2 @@
 # trackit
-Library files of Trackit App
+Trackit App
