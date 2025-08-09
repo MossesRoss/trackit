@@ -1,2 +1,0 @@
-# trackit
-Trackit App
