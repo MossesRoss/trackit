@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // <-- FIX: Added missing import
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import './models.dart';
 import './services.dart';
+import './reports_page.dart'; // NEW IMPORT
 
-// --- Home Page ---
+// --- Home Page (Largely unchanged) ---
 class HomePage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(String) onSetGoal;
@@ -51,10 +53,12 @@ class _HomePageState extends State<HomePage> {
     if (_nextMilestone == null) return;
     setState(() => _isLoading = true);
     final suggestion = await AIService.getSuggestion(_nextMilestone!);
-    setState(() {
-      _aiSuggestion = suggestion;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _aiSuggestion = suggestion;
+        _isLoading = false;
+      });
+    }
   }
 
   void _startFocusMode(Milestone milestone) {
@@ -184,8 +188,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-
-// --- Milestones Page ---
+// --- Milestones Page (Unchanged) ---
 class MilestonesPage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(Milestone) onAddMilestone;
@@ -202,10 +205,10 @@ class MilestonesPage extends StatefulWidget {
       required this.editMode});
 
   @override
-  State<MilestonesPage> createState() => MilestonesPageState(); // <-- FIX: Made public
+  State<MilestonesPage> createState() => MilestonesPageState();
 }
 
-class MilestonesPageState extends State<MilestonesPage> { // <-- FIX: Made public
+class MilestonesPageState extends State<MilestonesPage> {
   void showAddMilestoneDialog(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -257,8 +260,7 @@ class MilestonesPageState extends State<MilestonesPage> { // <-- FIX: Made publi
   }
 }
 
-
-// --- Settings Page ---
+// --- Settings Page (UPDATED) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -276,6 +278,7 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final authService = Provider.of<AuthService>(context, listen: false);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
@@ -294,11 +297,18 @@ class SettingsPage extends StatelessWidget {
             secondary: const Icon(Icons.edit_rounded),
           ),
           ListTile(
+            leading: const Icon(Icons.assessment_rounded), // NEW ICON
+            title: const Text("Reports"), // NEW
+            subtitle: const Text("View your weekly and monthly progress"), // NEW
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const ReportsPage())), // NEW
+          ),
+          ListTile(
             leading: const Icon(Icons.history_rounded),
             title: const Text("My Journey"),
             subtitle: const Text("View all your past and present goals"),
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => MyJourneyPage(allGoals: allGoals))),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MyJourneyPage(allGoals: allGoals))),
           ),
           ListTile(
             leading: const Icon(Icons.notifications_rounded),
@@ -318,13 +328,21 @@ class SettingsPage extends StatelessWidget {
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const GetInTouchPage())),
           ),
+          const Divider(),
+          ListTile(
+            leading: Icon(Icons.logout_rounded, color: Colors.red.shade400),
+            title: const Text("Sign Out"),
+            onTap: () {
+              authService.signOut();
+            },
+          ),
         ],
       ),
     );
   }
 }
 
-// --- Other UI Pages and Widgets ---
+// --- Other UI Pages and Widgets (Largely Unchanged) ---
 
 class MyJourneyPage extends StatelessWidget {
   final List<Goal> allGoals;
@@ -511,7 +529,7 @@ class HelpPage extends StatelessWidget {
             icon: Icons.lightbulb_rounded,
             title: "AI Suggestions",
             content:
-                "The Home page shows an AI-powered task to help you focus. This requires a Gemini API key from Google AI Studio to be added to the code.",
+                "The Home page shows an AI-powered task to help you focus. This requires a Gemini API key from Google AI Studio to be added to the .env file.",
           ),
           HelpTile(
             icon: Icons.timer_rounded,

@@ -1,33 +1,62 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
-// 1. Import the new package
-import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/services.dart'; // NEW: Import for Platform Channels
+import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
 import './models.dart';
 import './services.dart';
 import './ui.dart';
+import './auth_screen.dart';
 
 // --- Main Entry Point ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await dotenv.load(fileName: ".env");
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // --- FIX: NATIVE TIMEZONE IMPLEMENTATION ---
+  const MethodChannel timezoneChannel = MethodChannel('com.example.trackit/timezone');
+  String timeZoneName;
+  try {
+    timeZoneName = await timezoneChannel.invokeMethod('getLocalTimezone');
+  } on PlatformException {
+    timeZoneName = 'America/Detroit'; // Fallback timezone
+  }
+  // --- END FIX ---
+
   tz.initializeTimeZones();
   if (!kIsWeb) {
     if (Platform.isAndroid || Platform.isIOS) {
-      // 2. Use the new package to get the timezone
-      final String timeZoneName = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(timeZoneName));
     }
   }
 
   await initNotifications();
-  runApp(const MilestoneApp());
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthService()),
+        ProxyProvider<AuthService, FirestoreService>(
+          update: (_, auth, __) => FirestoreService(auth.currentUser?.uid),
+        ),
+      ],
+      child: const MilestoneApp(),
+    ),
+  );
 }
 
-// --- App Theme & Configuration ---
+// --- App Theme & Configuration (No changes below this line) ---
 class MilestoneApp extends StatefulWidget {
   const MilestoneApp({super.key});
 
@@ -99,13 +128,43 @@ class _MilestoneAppState extends State<MilestoneApp> {
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
-      home: MainPage(toggleDarkMode: _toggleDarkMode, isDarkMode: _isDarkMode),
+      home: AuthWrapper(
+        toggleDarkMode: _toggleDarkMode,
+        isDarkMode: _isDarkMode,
+      ),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-// --- Main Page (Handles Navigation & State) ---
+class AuthWrapper extends StatelessWidget {
+  final VoidCallback toggleDarkMode;
+  final bool isDarkMode;
+  const AuthWrapper(
+      {super.key, required this.toggleDarkMode, required this.isDarkMode});
+
+  @override
+  Widget build(BuildContext context) {
+    final authService = Provider.of<AuthService>(context);
+
+    return StreamBuilder(
+      stream: authService.authStateChanges,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasData) {
+          return MainPage(
+            toggleDarkMode: toggleDarkMode,
+            isDarkMode: isDarkMode,
+          );
+        }
+        return const AuthScreen();
+      },
+    );
+  }
+}
+
 class MainPage extends StatefulWidget {
   final VoidCallback toggleDarkMode;
   final bool isDarkMode;
@@ -141,16 +200,23 @@ class _MainPageState extends State<MainPage> {
   }
 
   Future<void> _loadGoals() async {
-    final goals = await PersistenceService.loadGoals();
-    setState(() {
-      _allGoals = goals;
-      _isLoading = false;
-      _updateMilestoneLockStatus();
-    });
+    setState(() => _isLoading = true);
+    final persistenceService =
+        Provider.of<FirestoreService>(context, listen: false);
+    final goals = await persistenceService.loadGoals();
+    if (mounted) {
+      setState(() {
+        _allGoals = goals;
+        _isLoading = false;
+        _updateMilestoneLockStatus();
+      });
+    }
   }
 
   Future<void> _saveGoals() async {
-    await PersistenceService.saveGoals(_allGoals);
+    final persistenceService =
+        Provider.of<FirestoreService>(context, listen: false);
+    await persistenceService.saveGoals(_allGoals);
   }
 
   void _onTabTapped(int index) {
@@ -280,7 +346,10 @@ class _MainPageState extends State<MainPage> {
     setState(() {
       final milestone =
           _activeGoal?.milestones.firstWhere((m) => m.id == milestoneId);
-      milestone?.timeSpent += timeToAdd;
+      if (milestone != null) {
+        milestone.timeSpent += timeToAdd;
+        milestone.lastWorkedOn = DateTime.now();
+      }
     });
     _saveGoals();
   }
@@ -294,27 +363,6 @@ class _MainPageState extends State<MainPage> {
         isLocked = true;
       }
     }
-  }
-
-  Future<bool> _onWillPop() async {
-    return (await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Are you sure?'),
-            content: const Text('Do you want to exit the app?'),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('No'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Yes'),
-              ),
-            ],
-          ),
-        )) ??
-        false;
   }
 
   @override
@@ -350,29 +398,26 @@ class _MainPageState extends State<MainPage> {
       ),
     ];
 
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        body: IndexedStack(
-          index: _selectedIndex,
-          children: pages,
-        ),
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: _selectedIndex,
-          onTap: _onTabTapped,
-          selectedItemColor: Theme.of(context).colorScheme.primary,
-          unselectedItemColor: Colors.grey,
-          backgroundColor: Theme.of(context).cardColor,
-          elevation: 4,
-          items: const [
-            BottomNavigationBarItem(
-                icon: Icon(Icons.home_rounded), label: 'Home'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.flag_rounded), label: 'Milestones'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.settings_rounded), label: 'Settings'),
-          ],
-        ),
+    return Scaffold(
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: pages,
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: _onTabTapped,
+        selectedItemColor: Theme.of(context).colorScheme.primary,
+        unselectedItemColor: Colors.grey,
+        backgroundColor: Theme.of(context).cardColor,
+        elevation: 4,
+        items: const [
+          BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded), label: 'Home'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.flag_rounded), label: 'Milestones'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.settings_rounded), label: 'Settings'),
+        ],
       ),
     );
   }
