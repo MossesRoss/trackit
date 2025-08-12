@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Enum for the status of a goal.
 enum GoalStatus { active, achieved, givenUp }
@@ -24,7 +23,7 @@ class Goal {
   List<Milestone> milestones;
   GoalStatus status;
   DateTime createdAt;
-  String? userId; // NEW: To link goal to a user
+  String? userId;
 
   Goal({
     required this.title,
@@ -37,16 +36,11 @@ class Goal {
         createdAt = createdAt ?? DateTime.now(),
         milestones = List<Milestone>.from(milestones);
 
-  int get totalTasks => milestones.isEmpty
-      ? 0
-      : milestones.map((m) => m.checkpoints.length).reduce((a, b) => a + b);
-  int get completedTasks => milestones.isEmpty
-      ? 0
-      : milestones
-          .map((m) => m.completedCheckpointIds.length)
-          .reduce((a, b) => a + b);
+  int get totalTasks => milestones.fold(0, (sum, m) => sum + m.checkpoints.length);
+  int get completedTasks => milestones.fold(0, (sum, m) => sum + m.completedCheckpointIds.length);
+
   bool get isCompleted =>
-      milestones.isNotEmpty && milestones.every((m) => m.isCompleted);
+      milestones.isNotEmpty && totalTasks > 0 && totalTasks == completedTasks;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -54,7 +48,7 @@ class Goal {
         'milestones': milestones.map((m) => m.toJson()).toList(),
         'status': status.index,
         'createdAt': createdAt.toIso8601String(),
-        'userId': userId, // NEW
+        'userId': userId,
       };
 
   factory Goal.fromJson(Map<String, dynamic> json) => Goal(
@@ -64,7 +58,7 @@ class Goal {
             json['milestones'].map((m) => Milestone.fromJson(m))),
         status: GoalStatus.values[json['status']],
         createdAt: DateTime.parse(json['createdAt']),
-        userId: json['userId'], // NEW
+        userId: json['userId'],
       );
 }
 
@@ -77,7 +71,7 @@ class Milestone {
   List<String> completedCheckpointIds;
   bool isUnlocked;
   Duration timeSpent;
-  DateTime? lastWorkedOn; // NEW: For tracking progress dates
+  DateTime? lastWorkedOn;
 
   Milestone({
     required this.title,
@@ -94,7 +88,7 @@ class Milestone {
   double get progress => checkpoints.isEmpty
       ? 0.0
       : completedCheckpointIds.length / checkpoints.length;
-  bool get isCompleted => progress == 1.0;
+  bool get isCompleted => checkpoints.isNotEmpty && progress == 1.0;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -103,7 +97,7 @@ class Milestone {
         'checkpoints': checkpoints.map((c) => c.toJson()).toList(),
         'completedCheckpointIds': completedCheckpointIds,
         'timeSpent': timeSpent.inSeconds,
-        'lastWorkedOn': lastWorkedOn?.toIso8601String(), // NEW
+        'lastWorkedOn': lastWorkedOn?.toIso8601String(),
       };
 
   factory Milestone.fromJson(Map<String, dynamic> json) {
@@ -118,7 +112,7 @@ class Milestone {
       timeSpent: Duration(seconds: json['timeSpent'] ?? 0),
       lastWorkedOn: json['lastWorkedOn'] != null
           ? DateTime.parse(json['lastWorkedOn'])
-          : null, // NEW
+          : null,
     );
   }
 }

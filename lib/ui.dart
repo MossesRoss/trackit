@@ -2,14 +2,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import './models.dart';
 import './services.dart';
-import './reports_page.dart'; // NEW IMPORT
+import './reports_page.dart';
 
-// --- Home Page (Largely unchanged) ---
+// --- Home Page ---
 class HomePage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(String) onSetGoal;
@@ -28,7 +29,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  String _aiSuggestion = "";
+  String _suggestion = "";
   bool _isLoading = false;
 
   Milestone? get _nextMilestone {
@@ -45,17 +46,17 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     if (_nextMilestone != null) {
-      _fetchAiSuggestion();
+      _fetchSuggestion();
     }
   }
 
-  Future<void> _fetchAiSuggestion() async {
+  Future<void> _fetchSuggestion() async {
     if (_nextMilestone == null) return;
     setState(() => _isLoading = true);
-    final suggestion = await AIService.getSuggestion(_nextMilestone!);
+    final suggestion = await SuggestionService.getSuggestion(_nextMilestone!);
     if (mounted) {
       setState(() {
-        _aiSuggestion = suggestion;
+        _suggestion = suggestion;
         _isLoading = false;
       });
     }
@@ -98,88 +99,109 @@ class _HomePageState extends State<HomePage> {
                           "No milestones yet. Add one on the Milestones page to see your progress!"))
                   : ListView(
                       children: [
+                        // --- FIX: New Combined Focus Card ---
                         Card(
                           elevation: 2,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16)),
-                          child: Container(
-                            padding: const EdgeInsets.all(24.0),
-                            width: double.infinity,
-                            child: Column(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Row(
                               children: [
-                                Icon(Icons.lightbulb_outline_rounded,
-                                    size: 32,
-                                    color: Colors.amber.shade700),
-                                const SizedBox(height: 12),
-                                const Text("Today's Focus",
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 16),
-                                _isLoading
-                                    ? const CircularProgressIndicator()
-                                    : Text(
-                                        _aiSuggestion,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                            fontSize: 16,
-                                            color: Theme.of(context)
-                                                .textTheme
-                                                .bodyMedium
-                                                ?.color
-                                                ?.withOpacity(0.8)),
-                                      ),
+                                // Left Side: Timer and Focus Logic
+                                Expanded(
+                                  child: GestureDetector(
+                                    onLongPress: _nextMilestone != null
+                                        ? () =>
+                                            _startFocusMode(_nextMilestone!)
+                                        : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text("00:00:00",
+                                            style: TextStyle(
+                                                fontSize: 32,
+                                                fontWeight: FontWeight.bold,
+                                                fontFamily: 'monospace')),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                            "Long-press to start focus session on '${_nextMilestone?.title ?? ''}'",
+                                            style: TextStyle(
+                                                color: Colors.grey.shade600,
+                                                fontSize: 12)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                // Right Side: Suggestion
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Icon(Icons.lightbulb_outline_rounded,
+                                          size: 24,
+                                          color: Colors.amber.shade700),
+                                      const SizedBox(height: 8),
+                                      _isLoading
+                                          ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2,)))
+                                          : Text(
+                                              _suggestion,
+                                              textAlign: TextAlign.right,
+                                              style: TextStyle(
+                                                  fontSize: 14,
+                                                  color: Theme.of(context)
+                                                      .textTheme
+                                                      .bodyMedium
+                                                      ?.color
+                                                      ?.withOpacity(0.8)),
+                                            ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 40),
-                        if (_nextMilestone != null)
-                          Text("Focus on: ${_nextMilestone!.title}",
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color:
-                                      Theme.of(context).colorScheme.primary)),
-                        const SizedBox(height: 16),
-                        if (_nextMilestone != null)
-                          GestureDetector(
-                            onLongPress: () => _startFocusMode(_nextMilestone!),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 24, vertical: 12),
-                              decoration: BoxDecoration(
-                                  color: Theme.of(context).cardColor,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                        color: Colors.black.withOpacity(0.05),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 4))
-                                  ]),
-                              child: const Text("00:00:00",
-                                  style: TextStyle(
-                                      fontSize: 48,
-                                      fontWeight: FontWeight.bold,
-                                      fontFamily: 'monospace')),
-                            ),
-                          ),
-                        if (_nextMilestone != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12.0),
-                            child: Text(
-                                "Long-press to start focus session",
-                                style: TextStyle(
-                                    color: Colors.grey.shade500,
-                                    fontSize: 12)),
-                          ),
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 24),
+                        const Text(
+                          "Overall Progress",
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
                         SizedBox(
                           height: 200,
                           child: ProgressPieChart(
                             completed: widget.activeGoal?.completedTasks ?? 0,
                             total: widget.activeGoal?.totalTasks ?? 0,
                           ),
-                        )
+                        ),
+                        const SizedBox(height: 24),
+                        // --- NEW: Milestone Progress Bar Chart ---
+                        const Text(
+                          "Milestone Breakdown",
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 200,
+                          child: Card(
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: Theme.of(context).dividerColor)
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: MilestoneProgressChart(
+                                  milestones:
+                                      widget.activeGoal?.milestones ?? []),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
         ),
@@ -188,7 +210,88 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// --- Milestones Page (Unchanged) ---
+// --- NEW: Bar Chart Widget for Milestone Progress ---
+class MilestoneProgressChart extends StatelessWidget {
+  final List<Milestone> milestones;
+  const MilestoneProgressChart({super.key, required this.milestones});
+
+  @override
+  Widget build(BuildContext context) {
+    if (milestones.isEmpty) {
+      return const Center(child: Text("No milestones to show."));
+    }
+
+    final barGroups = <BarChartGroupData>[];
+    for (int i = 0; i < milestones.length; i++) {
+      final milestone = milestones[i];
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: milestone.completedCheckpointIds.length.toDouble(),
+              color: Colors.deepPurple.shade300,
+              width: 16,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        barGroups: barGroups,
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (double value, TitleMeta meta) {
+                final index = value.toInt();
+                if (index >= 0 && index < milestones.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6.0),
+                    child: Text(
+                      milestones[index].title.substring(0, 3), // Show first 3 letters
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  );
+                }
+                return const Text('');
+              },
+              reservedSize: 28,
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(showTitles: true, reservedSize: 28),
+          ),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        borderData: FlBorderData(show: false),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: 1,
+          getDrawingHorizontalLine: (value) {
+            return FlLine(
+              color: Theme.of(context).dividerColor,
+              strokeWidth: 1,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+
+// --- Milestones Page ---
+// ... (The rest of the file is unchanged)
 class MilestonesPage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(Milestone) onAddMilestone;
@@ -216,7 +319,10 @@ class MilestonesPageState extends State<MilestonesPage> {
       builder: (context) => Padding(
         padding:
             EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: AddMilestoneForm(onAdd: widget.onAddMilestone),
+        child: AddMilestoneForm(
+          onAdd: widget.onAddMilestone,
+          goalTitle: widget.activeGoal?.title ?? "your goal",
+        ),
       ),
     );
   }
@@ -260,7 +366,6 @@ class MilestonesPageState extends State<MilestonesPage> {
   }
 }
 
-// --- Settings Page (UPDATED) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -297,11 +402,11 @@ class SettingsPage extends StatelessWidget {
             secondary: const Icon(Icons.edit_rounded),
           ),
           ListTile(
-            leading: const Icon(Icons.assessment_rounded), // NEW ICON
-            title: const Text("Reports"), // NEW
-            subtitle: const Text("View your weekly and monthly progress"), // NEW
+            leading: const Icon(Icons.assessment_rounded),
+            title: const Text("Reports"),
+            subtitle: const Text("View your weekly and monthly progress"),
             onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const ReportsPage())), // NEW
+                .push(MaterialPageRoute(builder: (_) => const ReportsPage())),
           ),
           ListTile(
             leading: const Icon(Icons.history_rounded),
@@ -342,8 +447,6 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// --- Other UI Pages and Widgets (Largely Unchanged) ---
-
 class MyJourneyPage extends StatelessWidget {
   final List<Goal> allGoals;
   const MyJourneyPage({super.key, required this.allGoals});
@@ -358,8 +461,8 @@ class MyJourneyPage extends StatelessWidget {
               itemCount: allGoals.length,
               itemBuilder: (context, index) {
                 final goal = allGoals[index];
-                final Color color;
-                final IconData icon;
+                Color color;
+                IconData icon;
                 final String statusText =
                     goal.status.name[0].toUpperCase() + goal.status.name.substring(1);
 
@@ -409,11 +512,22 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   int _notificationCount = 1;
   List<TimeOfDay> _notificationTimes = [const TimeOfDay(hour: 9, minute: 0)];
   bool _isLoading = true;
+  bool _hasExactAlarmPermission = false;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _checkPermissions();
+  }
+
+  Future<void> _checkPermissions() async {
+    final status = await Permission.scheduleExactAlarm.status;
+    if (mounted) {
+      setState(() {
+        _hasExactAlarmPermission = status.isGranted;
+      });
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -440,6 +554,13 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   }
 
   void _updateAndSaveChanges() {
+    if (!_hasExactAlarmPermission) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text("Permission denied. Cannot schedule notifications.")));
+        return;
+    }
+
     flutterLocalNotificationsPlugin.cancelAll();
     for (int i = 0; i < _notificationCount; i++) {
       scheduleNotification(
@@ -451,6 +572,8 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       );
     }
     _saveSettings();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Notification settings saved!")));
   }
 
   @override
@@ -462,6 +585,25 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (!_hasExactAlarmPermission)
+                  Card(
+                    color: Colors.red.shade100,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        children: [
+                          const Text("Permission Required", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                          const SizedBox(height: 8),
+                          const Text(
+                            "This app needs permission to schedule exact alarms for notifications to work correctly. Please grant this permission in your phone's settings.",
+                             textAlign: TextAlign.center,
+                          ),
+                           const SizedBox(height: 8),
+                          TextButton(onPressed: openAppSettings, child: const Text("Open Settings"))
+                        ],
+                      ),
+                    ),
+                  ),
                 Text("Number of daily reminders: $_notificationCount"),
                 Slider(
                   value: _notificationCount.toDouble(),
@@ -502,11 +644,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
                   ),
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: () {
-                    _updateAndSaveChanges();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text("Notification settings saved!")));
-                  },
+                  onPressed: _updateAndSaveChanges,
                   child: const Text("Save Settings"),
                 )
               ],
@@ -526,28 +664,40 @@ class HelpPage extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: const [
           HelpTile(
-            icon: Icons.lightbulb_rounded,
-            title: "AI Suggestions",
+            icon: Icons.track_changes_rounded,
+            title: "The Power of a Clear Goal",
             content:
-                "The Home page shows an AI-powered task to help you focus. This requires a Gemini API key from Google AI Studio to be added to the .env file.",
+                "Why set goals? 🤔 Goals give you direction and focus. They turn your dreams into a destination. When you know where you're going, you can start planning the journey. Think of it as the difference between wandering aimlessly and following a map to a hidden treasure. Every step you take is a step closer to success.",
           ),
           HelpTile(
-            icon: Icons.timer_rounded,
-            title: "Focus Timer",
+            icon: Icons.rule_rounded,
+            title: "Set Goals the SMART Way",
             content:
-                "Long-press the timer on the Home page to enter a full-screen Focus Mode. Long-press again to end the session and save your time.",
+                'To make your goals more powerful, make them SMART:\n\nSpecific: Instead of "get fit," try "run a 5k race."\nMeasurable: Track your progress. "Run 3 times a week."\nAchievable: Start with a goal you can realistically meet.\nRelevant: Does this goal matter to you right now?\nTime-bound: Set a deadline. "Run a 5k in 3 months."',
           ),
           HelpTile(
-            icon: Icons.edit_rounded,
-            title: "Edit Mode",
+            icon: Icons.splitscreen_rounded,
+            title: "Break It Down, Build It Up",
             content:
-                "Enable 'Edit Mode' in Settings to add, modify, or delete milestones. When turned off, you can only mark tasks as complete, preventing accidental changes.",
+                "Big goals can feel overwhelming. The secret is to break them into smaller, manageable tasks. 🪜 Want to write a book? Start with one chapter, then one page, then one paragraph. Our app lets you create milestones and tasks for your main goal. Ticking off these small wins will keep you motivated and build momentum.",
           ),
           HelpTile(
-            icon: Icons.check_circle_rounded,
-            title: "Completing Goals",
+            icon: Icons.show_chart_rounded,
+            title: "Track Your Progress, Stay Motivated",
             content:
-                "When all milestones for a goal are complete, the goal is marked as 'Achieved'. The app will automatically enter Edit Mode for you to set a new goal.",
+                "Seeing how far you've come is a powerful motivator. Use our app's reporting features to log your efforts and celebrate your milestones. Whether it's a chart showing your progress or a simple checklist, visual feedback makes your hard work feel real and rewarding. Don't forget to look back at your journey and see your success!",
+          ),
+          HelpTile(
+            icon: Icons.alt_route_rounded,
+            title: "Stay Flexible, Adjust as You Go",
+            content:
+                "Life happens! It's okay if you need to adjust your plan. A goal isn't set in stone. It's a guide, not a rule. If you miss a day or find a better approach, use our app to update your milestones or timeline. The key is to stay engaged with your goal and keep moving forward, no matter the pace.",
+          ),
+          HelpTile(
+            icon: Icons.celebration_rounded,
+            title: "Celebrate Every Victory!",
+            content:
+                "Don't wait until the very end to celebrate. 🎉 Every step forward is a victory. Did you complete a task? Did you stick to your schedule for a week? Acknowledge your effort! Use our app's features to mark your achievements. Celebrating small wins makes the journey enjoyable and fuels your motivation for the long run.",
           ),
         ],
       ),
@@ -578,9 +728,11 @@ class HelpTile extends StatelessWidget {
               children: [
                 Icon(icon, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold)),
+                Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold)),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -709,18 +861,15 @@ class _TimerFocusPageState extends State<TimerFocusPage> {
     );
 
     if (result == true) {
-      // Save and exit
       widget.onSessionComplete(Duration(seconds: _seconds));
       if (mounted) Navigator.of(context).pop();
-      return false; // Prevent default back behavior
+      return false;
     } else if (result == false) {
-      // Discard and exit
       if (mounted) Navigator.of(context).pop();
-      return false; // Prevent default back behavior
+      return false;
     } else {
-      // Dialog dismissed
       _startTimer();
-      return false; // Prevent default back behavior
+      return false;
     }
   }
 
@@ -964,139 +1113,156 @@ class MilestoneNode extends StatelessWidget {
             ? Theme.of(context).colorScheme.primary.withOpacity(0.1)
             : Colors.grey.shade200;
 
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 40,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (!isFirst)
-                  Expanded(child: Container(width: 2, color: Colors.grey.shade300)),
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: primaryColor,
-                  ),
-                  child: Icon(
-                    milestone.isCompleted
-                        ? Icons.check_rounded
-                        : milestone.isUnlocked
-                            ? Icons.flag_rounded
-                            : Icons.lock_rounded,
-                    color: Colors.white,
-                    size: 12,
-                  ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 40,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CustomPaint(
+                size: const Size(2, 80),
+                painter: LinePainter(isFirst: isFirst, isLast: isLast),
+              ),
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: primaryColor,
                 ),
-                if (!isLast)
-                  Expanded(child: Container(width: 2, color: Colors.grey.shade300)),
-              ],
-            ),
+                child: Icon(
+                  milestone.isCompleted
+                      ? Icons.check_rounded
+                      : milestone.isUnlocked
+                          ? Icons.flag_rounded
+                          : Icons.lock_rounded,
+                  color: Colors.white,
+                  size: 12,
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Card(
-                elevation: 1,
-                color: lightColor,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: primaryColor.withOpacity(0.5)),
-                ),
-                child: ExpansionTile(
-                  enabled: milestone.isUnlocked,
-                  title: Text(milestone.title,
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: milestone.isUnlocked ? null : Colors.grey)),
-                  subtitle: Row(
-                    children: [
-                      Text('Due: ${DateFormat.yMMMd().format(milestone.deadline)}'),
-                      const Spacer(),
-                      if (milestone.timeSpent > Duration.zero) ...[
-                        Icon(Icons.timer_outlined,
-                            size: 14, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Text(_formatDuration(milestone.timeSpent),
-                            style: TextStyle(color: Colors.grey.shade600)),
-                      ]
-                    ],
-                  ),
-                  trailing:
-                      milestone.isUnlocked ? null : const SizedBox.shrink(),
+        ),
+        Expanded(
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Card(
+              elevation: 1,
+              color: lightColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: primaryColor.withOpacity(0.5)),
+              ),
+              child: ExpansionTile(
+                enabled: milestone.isUnlocked,
+                title: Text(milestone.title,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: milestone.isUnlocked ? null : Colors.grey)),
+                subtitle: Row(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16.0).copyWith(top: 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (milestone.checkpoints.isNotEmpty) ...[
-                            LinearProgressIndicator(
-                              value: milestone.progress,
-                              backgroundColor: Colors.grey.shade300,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(primaryColor),
-                            ),
-                            const SizedBox(height: 16),
-                          ],
-                          SizedBox(
-                            height:
-                                milestone.checkpoints.length > 5 ? 200 : null,
-                            child: SingleChildScrollView(
-                              child: Column(
-                                children: milestone.checkpoints
-                                    .map((task) => CheckboxListTile(
-                                          value: milestone.completedCheckpointIds
-                                              .contains(task.id),
-                                          title: Text(task.title,
-                                              style: TextStyle(
-                                                  decoration: milestone
-                                                          .completedCheckpointIds
-                                                          .contains(task.id)
-                                                      ? TextDecoration.lineThrough
-                                                      : null)),
-                                          onChanged: milestone.isUnlocked
-                                              ? (val) =>
-                                                  _confirmToggle(context, task)
-                                              : null,
-                                          dense: true,
-                                          contentPadding: EdgeInsets.zero,
-                                          activeColor: primaryColor,
-                                        ))
-                                    .toList(),
-                              ),
-                            ),
-                          ),
-                          if (editMode)
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () => _confirmDelete(context),
-                                child: const Text("Delete",
-                                    style: TextStyle(color: Colors.red)),
-                              ),
-                            )
-                        ],
-                      ),
-                    ),
+                    Text('Due: ${DateFormat.yMMMd().format(milestone.deadline)}'),
+                    const Spacer(),
+                    if (milestone.timeSpent > Duration.zero) ...[
+                      Icon(Icons.timer_outlined,
+                          size: 14, color: Colors.grey.shade600),
+                      const SizedBox(width: 4),
+                      Text(_formatDuration(milestone.timeSpent),
+                          style: TextStyle(color: Colors.grey.shade600)),
+                    ]
                   ],
                 ),
+                trailing:
+                    milestone.isUnlocked ? null : const SizedBox.shrink(),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0).copyWith(top: 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (milestone.checkpoints.isNotEmpty) ...[
+                          LinearProgressIndicator(
+                            value: milestone.progress,
+                            backgroundColor: Colors.grey.shade300,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(primaryColor),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        Column(
+                          children: milestone.checkpoints
+                              .map((task) => CheckboxListTile(
+                                    value: milestone.completedCheckpointIds
+                                        .contains(task.id),
+                                    title: Text(task.title,
+                                        style: TextStyle(
+                                            decoration: milestone
+                                                    .completedCheckpointIds
+                                                    .contains(task.id)
+                                                ? TextDecoration.lineThrough
+                                                : null)),
+                                    onChanged: milestone.isUnlocked
+                                        ? (val) =>
+                                            _confirmToggle(context, task)
+                                        : null,
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    activeColor: primaryColor,
+                                  ))
+                              .toList(),
+                        ),
+                        if (editMode)
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => _confirmDelete(context),
+                              child: const Text("Delete",
+                                  style: TextStyle(color: Colors.red)),
+                            ),
+                          )
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
+class LinePainter extends CustomPainter {
+  final bool isFirst;
+  final bool isLast;
+  LinePainter({required this.isFirst, required this.isLast});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.grey.shade300
+      ..strokeWidth = 2;
+    
+    if (!isFirst) {
+      canvas.drawLine(Offset(size.width / 2, 0), Offset(size.width / 2, size.height / 2 - 10), paint);
+    }
+    if (!isLast) {
+      canvas.drawLine(Offset(size.width / 2, size.height / 2 + 10), Offset(size.width / 2, size.height), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+
 class AddMilestoneForm extends StatefulWidget {
   final Function(Milestone) onAdd;
-  const AddMilestoneForm({super.key, required this.onAdd});
+  final String goalTitle;
+  const AddMilestoneForm({super.key, required this.onAdd, required this.goalTitle});
 
   @override
   State<AddMilestoneForm> createState() => _AddMilestoneFormState();
@@ -1108,6 +1274,7 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
   final _tasksController = TextEditingController();
   DateTime? _selectedDate;
   bool _dateSubmittedOnce = false;
+  bool _isCheckingClarity = false;
 
   Future<void> _pickDate() async {
     final pickedDate = await showDatePicker(
@@ -1123,12 +1290,46 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
     }
   }
 
-  void _submit() {
+  void _submit() async {
     setState(() {
       _dateSubmittedOnce = true;
     });
 
-    if (_formKey.currentState!.validate() && _selectedDate != null) {
+    if (!_formKey.currentState!.validate() || _selectedDate == null) {
+      return;
+    }
+
+    final milestoneTitle = _titleController.text.trim();
+    final taskList = _tasksController.text.trim();
+
+    bool isVague = milestoneTitle.split(' ').length < 2 || taskList.split('\n').any((task) => task.split(' ').length < 2);
+    if (isVague) {
+      setState(() => _isCheckingClarity = true);
+      final advice = await SuggestionService.getTaskClarityAdvice(widget.goalTitle, milestoneTitle, taskList);
+      setState(() => _isCheckingClarity = false);
+      
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('A Quick Suggestion'),
+            content: Text(advice),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Got it, I\'ll edit')),
+              ElevatedButton(onPressed: () {
+                Navigator.of(ctx).pop();
+                _createMilestone();
+              }, child: const Text('Add Anyway')),
+            ],
+          ),
+        );
+      }
+    } else {
+      _createMilestone();
+    }
+  }
+
+  void _createMilestone() {
       final checkpoints = _tasksController.text
           .split('\n')
           .where((s) => s.trim().isNotEmpty)
@@ -1142,7 +1343,6 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
       );
       widget.onAdd(newMilestone);
       Navigator.pop(context);
-    }
   }
 
   @override
@@ -1195,10 +1395,12 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _submit,
-                child: const Text('Add Milestone'),
-              ),
+              child: _isCheckingClarity 
+                ? const Center(child: CircularProgressIndicator())
+                : ElevatedButton(
+                    onPressed: _submit,
+                    child: const Text('Add Milestone'),
+                  ),
             ),
           ],
         ),
@@ -1206,4 +1408,3 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
     );
   }
 }
-

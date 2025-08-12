@@ -100,7 +100,7 @@ class ReportView extends StatelessWidget {
         final reportData = snapshot.data!;
         final currentPeriod = reportData['currentPeriod'] as Map<String, dynamic>;
         final previousPeriod = reportData['previousPeriod'] as Map<String, dynamic>;
-        final aiSummary = reportData['aiSummary'] as String?;
+        final summary = reportData['summary'] as String?; // FIX: Renamed
 
         final Duration currentDuration = currentPeriod['timeSpent'];
         final int currentTasks = currentPeriod['tasksCompleted'];
@@ -110,9 +110,9 @@ class ReportView extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (aiSummary != null && aiSummary.isNotEmpty) ...[
+            if (summary != null && summary.isNotEmpty) ...[
               const Text(
-                "Your AI-Powered Summary",
+                "Your Monthly Summary", // FIX: Removed "AI-Powered"
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
@@ -121,14 +121,14 @@ class ReportView extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Text(
-                    aiSummary,
+                    summary,
                     style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
                   ),
                 ),
               ),
               const SizedBox(height: 24),
             ],
-            Text(
+            const Text(
               "Performance This Period",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),

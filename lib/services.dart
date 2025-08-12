@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, ChangeNotifier;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -15,6 +17,7 @@ import './models.dart';
 // --- Auth Service ---
 class AuthService with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
   User? _user;
 
   AuthService() {
@@ -42,13 +45,33 @@ class AuthService with ChangeNotifier {
       throw e.message ?? 'An unknown error occurred.';
     }
   }
+  
+  Future<void> signInWithGoogle() async {
+    try {
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        return; // User cancelled the sign-in
+      }
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      await _auth.signInWithCredential(credential);
+    // FIX: Only catch FirebaseAuthExceptions as actual login failures.
+    // Other exceptions from the GMS services can be ignored if login succeeds.
+    } on FirebaseAuthException catch (e) {
+      throw e.message ?? 'An unknown error occurred while signing in with Google.';
+    }
+  }
 
   Future<void> signOut() async {
+    await _googleSignIn.signOut();
     await _auth.signOut();
   }
 }
 
-// --- Firestore Service (Cloud & Local Cache Hybrid) ---
+// --- Firestore Service ---
 class FirestoreService {
   final String? uid;
   FirestoreService(this.uid);
@@ -56,52 +79,45 @@ class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   static const _localCacheKey = 'all_goals_cache';
 
-  // Save goals to both Firestore and local cache
   Future<void> saveGoals(List<Goal> allGoals) async {
     if (uid == null) return;
-    final goalsCollection = _db.collection('users').doc(uid).collection('goals');
+    final userDoc = _db.collection('users').doc(uid);
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.email != null) {
+        await userDoc.set({'email': user!.email}, SetOptions(merge: true));
+    }
 
-    // Write to Firestore
+    final goalsCollection = userDoc.collection('goals');
     for (var goal in allGoals) {
       goal.userId = uid;
       await goalsCollection.doc(goal.id).set(goal.toJson());
     }
 
-    // Write to local cache
     final prefs = await SharedPreferences.getInstance();
     final String goalsJson =
         json.encode(allGoals.map((g) => g.toJson()).toList());
     await prefs.setString(_localCacheKey, goalsJson);
   }
 
-  // Load goals from local cache first, then sync with Firestore
   Future<List<Goal>> loadGoals() async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // Try loading from local cache first for speed
     final String? localGoalsJson = prefs.getString(_localCacheKey);
     if (localGoalsJson != null) {
       final List<dynamic> decodedJson = json.decode(localGoalsJson);
-      final localGoals = decodedJson.map((g) => Goal.fromJson(g)).toList();
-      // Return local goals immediately for a fast UI response
-      // In a real app, you might trigger a background sync with Firestore here
-      return localGoals;
+      return decodedJson.map((g) => Goal.fromJson(g)).toList();
     }
 
-    // If no local cache, fetch from Firestore
     if (uid == null) return [];
     final goalsCollection = _db.collection('users').doc(uid).collection('goals');
     final snapshot = await goalsCollection.get();
     final goals = snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
 
-    // Save the fetched goals to the local cache for next time
     final String goalsJson = json.encode(goals.map((g) => g.toJson()).toList());
     await prefs.setString(_localCacheKey, goalsJson);
-
     return goals;
   }
 
-  // --- REPORTING LOGIC ---
   Future<Map<String, dynamic>> _getPeriodData(DateTime start, DateTime end) async {
     final allGoals = await loadGoals();
     Duration totalTime = Duration.zero;
@@ -141,10 +157,9 @@ class FirestoreService {
     final currentData = await _getPeriodData(startOfMonth, endOfMonth);
     final previousData = await _getPeriodData(startOfLastMonth, startOfMonth);
 
-    // Generate AI Summary for Monthly Report
-    final aiSummary = await AIService.getMonthlyReportSummary(currentData, previousData);
+    final summary = await SuggestionService.getMonthlyReportSummary(currentData, previousData);
 
-    return {'currentPeriod': currentData, 'previousPeriod': previousData, 'aiSummary': aiSummary};
+    return {'currentPeriod': currentData, 'previousPeriod': previousData, 'summary': summary};
   }
 
   Future<Map<String, dynamic>> getYearlyReport() async {
@@ -160,9 +175,7 @@ class FirestoreService {
   }
 }
 
-
-// --- AI Service ---
-class AIService {
+class SuggestionService {
   static final String? _apiKey = dotenv.env['GEMINI_API_KEY'];
 
   static Future<String> _callGemini(String prompt) async {
@@ -208,6 +221,23 @@ class AIService {
     return _callGemini(prompt);
   }
 
+  static Future<String> getTaskClarityAdvice(String goalTitle, String milestoneTitle, String taskList) async {
+    final prompt = """
+    A user is setting up a new milestone for their main goal. Critique the clarity and actionability of their milestone and tasks, and provide constructive feedback with 2-3 better, more specific examples. The user's input might be vague or gibberish.
+
+    Main Goal: "$goalTitle"
+    User's Milestone Title: "$milestoneTitle"
+    User's Task List (one per line):
+    $taskList
+
+    Your response should be a single, helpful paragraph. Start by gently pointing out that the tasks could be more specific. Then provide the examples.
+
+    Example response for a vague input:
+    "Breaking down a big goal is a great step! To make your milestones even more effective, try making the tasks more specific and actionable. For example, instead of 'marketing', you could have tasks like 'Draft 3 social media posts' or 'Research 5 potential marketing channels'."
+    """;
+    return _callGemini(prompt);
+  }
+
   static Future<String> getMonthlyReportSummary(Map<String, dynamic> currentData, Map<String, dynamic> previousData) async {
       final prompt = """
       Generate a concise, encouraging monthly performance report for a user of a goal-setting app.
@@ -227,44 +257,63 @@ class AIService {
   }
 }
 
-// --- Notification Service (Largely unchanged) ---
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-Future<void> initNotifications() async {
-  // ... (rest of the notification code is unchanged)
-  if (!kIsWeb) {
-    if (Platform.isAndroid || Platform.isIOS) {
-      await Permission.notification.isDenied.then((value) {
-        if (value) {
-          Permission.notification.request();
-        }
-      });
-    }
+// FIX: Updated notification logic for clarity and robustness
+Future<void> initNotifications(BuildContext context) async {
+  if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+    return;
   }
 
+  // 1. Initialize the plugin first
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
-  const LinuxInitializationSettings initializationSettingsLinux =
-      LinuxInitializationSettings(defaultActionName: 'Open notification');
   final DarwinInitializationSettings initializationSettingsIOS =
-      DarwinInitializationSettings(
-          requestAlertPermission: true,
-          requestBadgePermission: true,
-          requestSoundPermission: true);
-
+      DarwinInitializationSettings();
   final InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
-    linux: initializationSettingsLinux,
     iOS: initializationSettingsIOS,
-    macOS: initializationSettingsIOS,
   );
-
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  // 2. Request basic notification permission
+  await Permission.notification.request();
+
+  // 3. Check and request the special "exact alarm" permission
+  final alarmStatus = await Permission.scheduleExactAlarm.status;
+  if (alarmStatus.isDenied) {
+    // If denied, we need to guide the user to settings.
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Permission Required'),
+        content: const Text(
+            'To send reminders at a specific time, this app needs permission to schedule alarms. Please enable this in the app settings.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Later')),
+          TextButton(
+              onPressed: () {
+                openAppSettings();
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Open Settings')),
+        ],
+      ),
+    );
+  }
 }
+
 
 Future<void> scheduleNotification(
     int id, String title, String body, int hour, int minute) async {
+  if (await Permission.notification.isDenied || await Permission.scheduleExactAlarm.isDenied) {
+      print("Permissions are denied. Cannot schedule notification.");
+      return;
+  }
+    
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
     tz.TZDateTime scheduledDate =
@@ -284,15 +333,20 @@ Future<void> scheduleNotification(
   var platformChannelSpecifics =
       NotificationDetails(android: androidPlatformChannelSpecifics);
 
-  await flutterLocalNotificationsPlugin.zonedSchedule(
-    id,
-    title,
-    body,
-    _nextInstanceOfTime(hour, minute),
-    platformChannelSpecifics,
-    uiLocalNotificationDateInterpretation:
-        UILocalNotificationDateInterpretation.absoluteTime,
-    matchDateTimeComponents: DateTimeComponents.time,
-  );
+  try {
+    await flutterLocalNotificationsPlugin.zonedSchedule(
+      id,
+      title,
+      body,
+      _nextInstanceOfTime(hour, minute),
+      platformChannelSpecifics,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+    print("Notification scheduled successfully for $hour:$minute");
+  } catch(e) {
+    print("Error scheduling notification: $e");
+  }
 }
 

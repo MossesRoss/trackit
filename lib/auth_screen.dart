@@ -35,6 +35,26 @@ class _AuthScreenState extends State<AuthScreen> {
       }
       // No need to set isLoading to false here, as the AuthWrapper will rebuild
     } catch (error) {
+      // FIX: Check if the widget is still mounted before showing a SnackBar
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString()),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _googleSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await authService.signInWithGoogle();
+    } catch (error) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -98,17 +118,18 @@ class _AuthScreenState extends State<AuthScreen> {
                             },
                           ),
                           const SizedBox(height: 12),
-                          if (_isLoading) const CircularProgressIndicator(),
-                          if (!_isLoading)
+                          if (_isLoading)
+                            const CircularProgressIndicator()
+                          else ...[
                             ElevatedButton(
                               onPressed: _submit,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor:
-                                    Theme.of(context).colorScheme.primaryContainer,
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer,
                               ),
                               child: Text(_isLogin ? 'Login' : 'Signup'),
                             ),
-                          if (!_isLoading)
                             TextButton(
                               onPressed: () {
                                 setState(() {
@@ -119,6 +140,31 @@ class _AuthScreenState extends State<AuthScreen> {
                                   ? 'Create an account'
                                   : 'I already have an account'),
                             ),
+                            const SizedBox(height: 10),
+                            const Row(
+                              children: [
+                                Expanded(child: Divider()),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8.0),
+                                  child: Text('OR'),
+                                ),
+                                Expanded(child: Divider()),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            // NEW: Google Sign In Button
+                            ElevatedButton.icon(
+                              icon: Image.asset('assets/google_logo.png', height: 24.0), // You need to add a google logo to your assets
+                              label: const Text('Continue with Google'),
+                              onPressed: _googleSignIn,
+                              style: ElevatedButton.styleFrom(
+                                foregroundColor: Colors.black,
+                                backgroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.grey),
+                                minimumSize: const Size(double.infinity, 50),
+                              ),
+                            ),
+                          ]
                         ],
                       ),
                     ),

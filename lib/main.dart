@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter/services.dart'; // NEW: Import for Platform Channels
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -14,7 +14,18 @@ import './services.dart';
 import './ui.dart';
 import './auth_screen.dart';
 
-// --- Main Entry Point ---
+class ThemeProvider with ChangeNotifier {
+  ThemeMode _themeMode = ThemeMode.light;
+  ThemeMode get themeMode => _themeMode;
+
+  bool get isDarkMode => _themeMode == ThemeMode.dark;
+
+  void toggleTheme() {
+    _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    notifyListeners();
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -24,15 +35,13 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // --- FIX: NATIVE TIMEZONE IMPLEMENTATION ---
   const MethodChannel timezoneChannel = MethodChannel('com.example.trackit/timezone');
   String timeZoneName;
   try {
     timeZoneName = await timezoneChannel.invokeMethod('getLocalTimezone');
   } on PlatformException {
-    timeZoneName = 'America/Detroit'; // Fallback timezone
+    timeZoneName = 'America/Detroit';
   }
-  // --- END FIX ---
 
   tz.initializeTimeZones();
   if (!kIsWeb) {
@@ -41,11 +50,13 @@ Future<void> main() async {
     }
   }
 
-  await initNotifications();
+  // Note: initNotifications is now called within the app's lifecycle
+  // where a BuildContext is available.
 
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => AuthService()),
         ProxyProvider<AuthService, FirestoreService>(
           update: (_, auth, __) => FirestoreService(auth.currentUser?.uid),
@@ -56,25 +67,13 @@ Future<void> main() async {
   );
 }
 
-// --- App Theme & Configuration (No changes below this line) ---
-class MilestoneApp extends StatefulWidget {
+class MilestoneApp extends StatelessWidget {
   const MilestoneApp({super.key});
 
   @override
-  State<MilestoneApp> createState() => _MilestoneAppState();
-}
-
-class _MilestoneAppState extends State<MilestoneApp> {
-  bool _isDarkMode = false;
-
-  void _toggleDarkMode() {
-    setState(() {
-      _isDarkMode = !_isDarkMode;
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+
     final lightTheme = ThemeData(
       brightness: Brightness.light,
       primarySwatch: Colors.deepPurple,
@@ -124,24 +123,18 @@ class _MilestoneAppState extends State<MilestoneApp> {
     );
 
     return MaterialApp(
-      title: 'Milestone AI',
+      title: 'Milestone',
       theme: lightTheme,
       darkTheme: darkTheme,
-      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
-      home: AuthWrapper(
-        toggleDarkMode: _toggleDarkMode,
-        isDarkMode: _isDarkMode,
-      ),
+      themeMode: themeProvider.themeMode,
+      home: const AuthWrapper(),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
 class AuthWrapper extends StatelessWidget {
-  final VoidCallback toggleDarkMode;
-  final bool isDarkMode;
-  const AuthWrapper(
-      {super.key, required this.toggleDarkMode, required this.isDarkMode});
+  const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -154,10 +147,7 @@ class AuthWrapper extends StatelessWidget {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
-          return MainPage(
-            toggleDarkMode: toggleDarkMode,
-            isDarkMode: isDarkMode,
-          );
+          return const MainPage();
         }
         return const AuthScreen();
       },
@@ -166,11 +156,7 @@ class AuthWrapper extends StatelessWidget {
 }
 
 class MainPage extends StatefulWidget {
-  final VoidCallback toggleDarkMode;
-  final bool isDarkMode;
-
-  const MainPage(
-      {super.key, required this.toggleDarkMode, required this.isDarkMode});
+  const MainPage({super.key});
 
   @override
   State<MainPage> createState() => _MainPageState();
@@ -196,6 +182,10 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
+    // FIX: Call initNotifications here, where context is available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      initNotifications(context);
+    });
     _loadGoals();
   }
 
@@ -372,6 +362,8 @@ class _MainPageState extends State<MainPage> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
+    
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
 
     final List<Widget> pages = [
       HomePage(
@@ -390,8 +382,8 @@ class _MainPageState extends State<MainPage> {
         editMode: _editMode,
       ),
       SettingsPage(
-        isDarkMode: widget.isDarkMode,
-        toggleDarkMode: widget.toggleDarkMode,
+        isDarkMode: themeProvider.isDarkMode,
+        toggleDarkMode: themeProvider.toggleTheme,
         editMode: _editMode,
         onEditModeChanged: (val) => setState(() => _editMode = val),
         allGoals: _allGoals,
