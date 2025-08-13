@@ -14,7 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
 import './models.dart';
 
-// --- Auth Service ---
+// --- Auth Service (unchanged) ---
 class AuthService with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
@@ -58,8 +58,6 @@ class AuthService with ChangeNotifier {
         idToken: googleAuth.idToken,
       );
       await _auth.signInWithCredential(credential);
-    // FIX: Only catch FirebaseAuthExceptions as actual login failures.
-    // Other exceptions from the GMS services can be ignored if login succeeds.
     } on FirebaseAuthException catch (e) {
       throw e.message ?? 'An unknown error occurred while signing in with Google.';
     }
@@ -71,7 +69,7 @@ class AuthService with ChangeNotifier {
   }
 }
 
-// --- Firestore Service ---
+// --- Firestore Service (unchanged) ---
 class FirestoreService {
   final String? uid;
   FirestoreService(this.uid);
@@ -196,24 +194,43 @@ class SuggestionService {
         }),
       );
 
+      // FIX: Add specific handling for 503 Service Unavailable errors.
+      if (response.statusCode == 503) {
+        return "The AI service is temporarily unavailable. Please try again later.";
+      }
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return data['candidates'][0]['content']['parts'][0]['text'].trim();
       } else {
         final errorBody = json.decode(response.body);
         final errorMessage = errorBody['error']?['message'] ?? 'Unknown API error.';
+        debugPrint("Gemini API Error: ${response.body}");
         return "Error ${response.statusCode}: $errorMessage";
       }
     } catch (e) {
+      debugPrint("Gemini connection Error: $e");
       return "Error: Failed to connect. Check network or API key.";
     }
   }
 
-  static Future<String> getSuggestion(Milestone nextMilestone) async {
+  static Future<String> getSuggestion(Milestone? nextMilestone) async {
+    if (nextMilestone == null) {
+      return "All tasks complete! Great job on finishing your milestones.";
+    }
+    
+    if (nextMilestone.checkpoints.isEmpty) {
+      return "This milestone has no tasks. Add some tasks to get started!";
+    }
+
     final remainingTasks = nextMilestone.checkpoints
         .where((c) => !nextMilestone.completedCheckpointIds.contains(c.id))
         .map((c) => c.title)
         .join(', ');
+        
+    if (remainingTasks.isEmpty) {
+      return "Milestone '${nextMilestone.title}' is complete! Well done!";
+    }
 
     final prompt =
         "My current milestone is '${nextMilestone.title}' due on ${DateFormat.yMMMd().format(nextMilestone.deadline)}. The remaining tasks are: $remainingTasks. What is a single, concise, and actionable task I should focus on right now to make progress? Keep it short, motivating, and start with an action verb.";
@@ -221,21 +238,32 @@ class SuggestionService {
     return _callGemini(prompt);
   }
 
-  static Future<String> getTaskClarityAdvice(String goalTitle, String milestoneTitle, String taskList) async {
+  static Future<List<String>> getTaskSuggestions(String goalTitle, String milestoneTitle) async {
     final prompt = """
-    A user is setting up a new milestone for their main goal. Critique the clarity and actionability of their milestone and tasks, and provide constructive feedback with 2-3 better, more specific examples. The user's input might be vague or gibberish.
-
+    A user is planning their goal.
     Main Goal: "$goalTitle"
-    User's Milestone Title: "$milestoneTitle"
-    User's Task List (one per line):
-    $taskList
-
-    Your response should be a single, helpful paragraph. Start by gently pointing out that the tasks could be more specific. Then provide the examples.
-
-    Example response for a vague input:
-    "Breaking down a big goal is a great step! To make your milestones even more effective, try making the tasks more specific and actionable. For example, instead of 'marketing', you could have tasks like 'Draft 3 social media posts' or 'Research 5 potential marketing channels'."
+    Current Milestone: "$milestoneTitle"
+    
+    Suggest 3 to 4 actionable, specific sub-tasks for this milestone. Respond with only a JSON object containing a single key 'tasks' which is an array of strings. Do not include markdown formatting like ```json.
+    
+    Example:
+    {
+      "tasks": [
+        "Draft initial chapter outline",
+        "Write 500 words for the first section",
+        "Research key historical events for context"
+      ]
+    }
     """;
-    return _callGemini(prompt);
+    try {
+      final response = await _callGemini(prompt);
+      final cleanedResponse = response.replaceAll('```json', '').replaceAll('```', '').trim();
+      final decoded = json.decode(cleanedResponse);
+      return List<String>.from(decoded['tasks']);
+    } catch (e) {
+      debugPrint("Error decoding task suggestions: $e, Response: $e");
+      return [];
+    }
   }
 
   static Future<String> getMonthlyReportSummary(Map<String, dynamic> currentData, Map<String, dynamic> previousData) async {
@@ -257,16 +285,25 @@ class SuggestionService {
   }
 }
 
+// --- Notification Service ---
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-// FIX: Updated notification logic for clarity and robustness
+const _focusChannelId = 'focus_channel_id';
+const _focusChannelName = 'Focus Mode';
+const _focusChannelDesc = 'Notification shown while in a focus session.';
+const _focusNotificationId = 99; // A unique ID for the focus notification
+
+const _reminderChannelId = 'milestone_channel_id';
+const _reminderChannelName = 'Milestone Reminders';
+const _reminderChannelDesc = 'Channel for Milestone app reminders';
+
+
 Future<void> initNotifications(BuildContext context) async {
   if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
     return;
   }
 
-  // 1. Initialize the plugin first
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
   final DarwinInitializationSettings initializationSettingsIOS =
@@ -277,40 +314,42 @@ Future<void> initNotifications(BuildContext context) async {
   );
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
-  // 2. Request basic notification permission
   await Permission.notification.request();
 
-  // 3. Check and request the special "exact alarm" permission
   final alarmStatus = await Permission.scheduleExactAlarm.status;
   if (alarmStatus.isDenied) {
-    // If denied, we need to guide the user to settings.
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Permission Required'),
-        content: const Text(
-            'To send reminders at a specific time, this app needs permission to schedule alarms. Please enable this in the app settings.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Later')),
-          TextButton(
-              onPressed: () {
-                openAppSettings();
-                Navigator.of(ctx).pop();
-              },
-              child: const Text('Open Settings')),
-        ],
-      ),
-    );
+    // This dialog is helpful for the first time, but can be removed if it becomes annoying
   }
 }
 
+Future<void> showFocusNotification(String milestoneTitle) async {
+  var androidPlatformChannelSpecifics = const AndroidNotificationDetails(
+      _focusChannelId, _focusChannelName,
+      channelDescription: _focusChannelDesc,
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+  );
+  var platformChannelSpecifics =
+      NotificationDetails(android: androidPlatformChannelSpecifics);
+  
+  await flutterLocalNotificationsPlugin.show(
+    _focusNotificationId,
+    'Focusing on: $milestoneTitle',
+    'Your session is in progress...',
+    platformChannelSpecifics,
+  );
+}
+
+Future<void> cancelFocusNotification() async {
+  await flutterLocalNotificationsPlugin.cancel(_focusNotificationId);
+}
 
 Future<void> scheduleNotification(
     int id, String title, String body, int hour, int minute) async {
   if (await Permission.notification.isDenied || await Permission.scheduleExactAlarm.isDenied) {
-      print("Permissions are denied. Cannot schedule notification.");
+      debugPrint("Permissions are denied. Cannot schedule notification.");
       return;
   }
     
@@ -325,8 +364,8 @@ Future<void> scheduleNotification(
   }
 
   var androidPlatformChannelSpecifics = const AndroidNotificationDetails(
-      'milestone_channel_id', 'Milestone Reminders',
-      channelDescription: 'Channel for Milestone app reminders',
+      _reminderChannelId, _reminderChannelName,
+      channelDescription: _reminderChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
       showWhen: false);
@@ -334,19 +373,20 @@ Future<void> scheduleNotification(
       NotificationDetails(android: androidPlatformChannelSpecifics);
 
   try {
+    final scheduledTime = _nextInstanceOfTime(hour, minute);
     await flutterLocalNotificationsPlugin.zonedSchedule(
       id,
       title,
       body,
-      _nextInstanceOfTime(hour, minute),
+      scheduledTime,
       platformChannelSpecifics,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
     );
-    print("Notification scheduled successfully for $hour:$minute");
+    debugPrint("Notification #$id scheduled successfully for $scheduledTime");
   } catch(e) {
-    print("Error scheduling notification: $e");
+    debugPrint("Error scheduling notification #$id: $e");
   }
 }
 

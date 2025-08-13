@@ -44,15 +44,18 @@ dev_dependencies:
   flutter_lints: ^3.0.0 
   flutter_launcher_icons: ^0.13.1 
 
+# FIX: Corrected the image_path to point directly to the icon file.
 flutter_icons:
   android: true
-  image_path: "assets/icon/icon.png"
+  image_path: "assets/icon.png"
 
 flutter:
   uses-material-design: true
   
-  # FIX: Declare the assets folder so the app can find the Google logo
+  # FIX: Declared the assets folder and subfolders so the app can find the images.
+  # You should have your icon at 'assets/icon.png' and the google logo at 'assets/google_logo.png'
   assets:
     - .env
     - assets/
+    - assets/icon/
 

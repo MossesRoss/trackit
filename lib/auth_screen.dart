@@ -75,6 +75,19 @@ class _AuthScreenState extends State<AuthScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // FIX: Added App Icon and Name for better branding on the auth screen.
+              // Make sure you have an icon at 'assets/icon.png'
+              Image.asset('assets/icon.png', height: 80, errorBuilder: (context, error, stackTrace) => const Icon(Icons.track_changes, size: 80, color: Colors.white)),
+              const SizedBox(height: 8),
+              const Text(
+                'Track It',
+                style: TextStyle(
+                  fontSize: 32,
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
               Card(
                 margin: const EdgeInsets.all(20),
                 child: SingleChildScrollView(
