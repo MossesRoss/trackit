@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
@@ -7,12 +8,51 @@ import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'firebase_options.dart';
 
+// FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 import './ui.dart';
 import './auth_screen.dart';
+
+// --- NEW: Global navigator key to access context from background ---
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// --- NEW: Top-level function to handle notification responses ---
+void _onNotificationResponse(NotificationResponse response) {
+  if (response.payload != null && response.payload!.isNotEmpty) {
+    final payloadData = json.decode(response.payload!);
+    final goalId = payloadData['goalId'];
+    final milestoneId = payloadData['milestoneId'];
+    final checkpointId = payloadData['checkpointId'];
+    
+    TaskCheckinStatus status;
+    switch (response.actionId) {
+      case doneActionId:
+        status = TaskCheckinStatus.done;
+        break;
+      case doingActionId:
+        status = TaskCheckinStatus.doing;
+        break;
+      case willDoActionId:
+        status = TaskCheckinStatus.willDo;
+        break;
+      case wontDoActionId:
+        status = TaskCheckinStatus.wontDo;
+        break;
+      default:
+        return; // Ignore if it's not one of our actions
+    }
+
+    // Use the navigator key to get the MainPageState and call the method
+    final mainPageState = navigatorKey.currentContext
+        ?.findAncestorStateOfType<_MainPageState>();
+    mainPageState?.recordTaskCheckin(goalId, milestoneId, checkpointId, status);
+  }
+}
+
 
 class ThemeProvider with ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.light;
@@ -50,8 +90,8 @@ Future<void> main() async {
     }
   }
 
-  // Note: initNotifications is now called within the app's lifecycle
-  // where a BuildContext is available.
+  // Pass the handler function to the init method
+  await initNotifications(_onNotificationResponse);
 
   runApp(
     MultiProvider(
@@ -123,7 +163,8 @@ class MilestoneApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'Milestone',
+      navigatorKey: navigatorKey, // Assign the global key
+      title: 'Track It',
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: themeProvider.themeMode,
@@ -182,10 +223,6 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
-    // FIX: Call initNotifications here, where context is available
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      initNotifications(context);
-    });
     _loadGoals();
   }
 
@@ -220,6 +257,9 @@ class _MainPageState extends State<MainPage> {
       final currentActiveGoal = _activeGoal;
       if (currentActiveGoal != null) {
         currentActiveGoal.status = GoalStatus.givenUp;
+        // Also archive the old goal
+        Provider.of<FirestoreService>(context, listen: false)
+            .archiveGoal(currentActiveGoal);
       }
       _allGoals.add(Goal(title: goalTitle));
       _selectedIndex = 1;
@@ -271,6 +311,9 @@ class _MainPageState extends State<MainPage> {
       if (confirmed == true) {
         setState(() {
           _activeGoal!.status = GoalStatus.givenUp;
+          // --- NEW: Archive the goal when given up ---
+          Provider.of<FirestoreService>(context, listen: false)
+              .archiveGoal(_activeGoal!);
         });
         _saveGoals();
       }
@@ -303,6 +346,9 @@ class _MainPageState extends State<MainPage> {
       setState(() {
         _activeGoal!.status = GoalStatus.achieved;
         _editMode = true;
+        // --- NEW: Archive the goal upon completion ---
+        Provider.of<FirestoreService>(context, listen: false)
+            .archiveGoal(_activeGoal!);
       });
       _saveGoals();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -342,6 +388,21 @@ class _MainPageState extends State<MainPage> {
       }
     });
     _saveGoals();
+  }
+
+  // --- NEW: Method to handle check-in responses from notifications ---
+  void recordTaskCheckin(String goalId, String milestoneId, String checkpointId, TaskCheckinStatus status) {
+    setState(() {
+      final goal = _allGoals.firstWhere((g) => g.id == goalId, orElse: () => Goal(title: ''));
+      if (goal.title.isEmpty) return;
+
+      final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId, orElse: () => Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
+      if (milestone.title.isEmpty) return;
+
+      milestone.checkins.add(TaskCheckin(checkpointId: checkpointId, status: status));
+    });
+    _saveGoals();
+    debugPrint("Check-in recorded for $checkpointId with status $status");
   }
 
   void _updateMilestoneLockStatus() {

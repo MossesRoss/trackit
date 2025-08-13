@@ -1,5 +1,34 @@
 import 'package:flutter/material.dart';
 
+// --- NEW: Enum for the status of a task check-in ---
+enum TaskCheckinStatus { done, doing, willDo, wontDo }
+
+// --- NEW: Represents a single check-in response from a notification ---
+class TaskCheckin {
+  final String checkpointId;
+  final TaskCheckinStatus status;
+  final DateTime timestamp;
+
+  TaskCheckin({
+    required this.checkpointId,
+    required this.status,
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+        'checkpointId': checkpointId,
+        'status': status.index,
+        'timestamp': timestamp.toIso8601String(),
+      };
+
+  factory TaskCheckin.fromJson(Map<String, dynamic> json) => TaskCheckin(
+        checkpointId: json['checkpointId'],
+        status: TaskCheckinStatus.values[json['status']],
+        timestamp: DateTime.parse(json['timestamp']),
+      );
+}
+
+
 // Enum for the status of a goal.
 enum GoalStatus { active, achieved, givenUp }
 
@@ -24,6 +53,8 @@ class Goal {
   GoalStatus status;
   DateTime createdAt;
   String? userId;
+  // --- NEW: Flag to indicate if the goal has been archived ---
+  bool isArchived;
 
   Goal({
     required this.title,
@@ -32,6 +63,7 @@ class Goal {
     String? id,
     DateTime? createdAt,
     this.userId,
+    this.isArchived = false, // Default to not archived
   })  : id = id ?? UniqueKey().toString(),
         createdAt = createdAt ?? DateTime.now(),
         milestones = List<Milestone>.from(milestones);
@@ -49,16 +81,18 @@ class Goal {
         'status': status.index,
         'createdAt': createdAt.toIso8601String(),
         'userId': userId,
+        'isArchived': isArchived,
       };
 
   factory Goal.fromJson(Map<String, dynamic> json) => Goal(
         id: json['id'],
         title: json['title'],
         milestones: List<Milestone>.from(
-            json['milestones'].map((m) => Milestone.fromJson(m))),
+            (json['milestones'] as List).map((m) => Milestone.fromJson(m))),
         status: GoalStatus.values[json['status']],
         createdAt: DateTime.parse(json['createdAt']),
         userId: json['userId'],
+        isArchived: json['isArchived'] ?? false,
       );
 }
 
@@ -72,6 +106,8 @@ class Milestone {
   bool isUnlocked;
   Duration timeSpent;
   DateTime? lastWorkedOn;
+  // --- NEW: List to store task check-in records ---
+  List<TaskCheckin> checkins;
 
   Milestone({
     required this.title,
@@ -82,8 +118,10 @@ class Milestone {
     this.timeSpent = Duration.zero,
     this.lastWorkedOn,
     String? id,
+    List<TaskCheckin> checkins = const [], // Initialize with empty list
   })  : id = id ?? UniqueKey().toString(),
-        completedCheckpointIds = List<String>.from(completedCheckpointIds);
+        completedCheckpointIds = List<String>.from(completedCheckpointIds),
+        checkins = List<TaskCheckin>.from(checkins);
 
   double get progress => checkpoints.isEmpty
       ? 0.0
@@ -98,6 +136,7 @@ class Milestone {
         'completedCheckpointIds': completedCheckpointIds,
         'timeSpent': timeSpent.inSeconds,
         'lastWorkedOn': lastWorkedOn?.toIso8601String(),
+        'checkins': checkins.map((c) => c.toJson()).toList(),
       };
 
   factory Milestone.fromJson(Map<String, dynamic> json) {
@@ -106,13 +145,17 @@ class Milestone {
       title: json['title'],
       deadline: DateTime.parse(json['deadline']),
       checkpoints: List<Checkpoint>.from(
-          json['checkpoints'].map((c) => Checkpoint.fromJson(c))),
+          (json['checkpoints'] as List).map((c) => Checkpoint.fromJson(c))),
       completedCheckpointIds:
           List<String>.from(json['completedCheckpointIds']),
       timeSpent: Duration(seconds: json['timeSpent'] ?? 0),
       lastWorkedOn: json['lastWorkedOn'] != null
           ? DateTime.parse(json['lastWorkedOn'])
           : null,
+      // Handle potentially null check-ins for backward compatibility
+      checkins: json['checkins'] == null 
+          ? [] 
+          : List<TaskCheckin>.from((json['checkins'] as List).map((c) => TaskCheckin.fromJson(c))),
     );
   }
 }

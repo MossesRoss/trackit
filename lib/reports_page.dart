@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+// FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 
@@ -57,6 +58,7 @@ class _ReportsPageState extends State<ReportsPage>
           ReportView(
             title: 'Yearly Report',
             reportFuture: firestoreService.getYearlyReport(),
+            isYearly: true,
           ),
         ],
       ),
@@ -67,11 +69,13 @@ class _ReportsPageState extends State<ReportsPage>
 class ReportView extends StatelessWidget {
   final String title;
   final Future<Map<String, dynamic>> reportFuture;
+  final bool isYearly;
 
   const ReportView({
     super.key,
     required this.title,
     required this.reportFuture,
+    this.isYearly = false,
   });
 
   String _formatDuration(Duration duration) {
@@ -100,7 +104,9 @@ class ReportView extends StatelessWidget {
         final reportData = snapshot.data!;
         final currentPeriod = reportData['currentPeriod'] as Map<String, dynamic>;
         final previousPeriod = reportData['previousPeriod'] as Map<String, dynamic>;
-        final summary = reportData['summary'] as String?; // FIX: Renamed
+        final summary = reportData['summary'] as String?;
+        final checkinCounts = currentPeriod['checkinCounts'] as Map<TaskCheckinStatus, int>;
+        final archivedGoals = reportData['archivedGoals'] as List<Goal>?;
 
         final Duration currentDuration = currentPeriod['timeSpent'];
         final int currentTasks = currentPeriod['tasksCompleted'];
@@ -112,7 +118,7 @@ class ReportView extends StatelessWidget {
           children: [
             if (summary != null && summary.isNotEmpty) ...[
               const Text(
-                "Your Monthly Summary", // FIX: Removed "AI-Powered"
+                "Your Monthly Summary",
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
@@ -139,12 +145,109 @@ class ReportView extends StatelessWidget {
               comparisonTime: currentDuration.inSeconds - previousDuration.inSeconds,
               comparisonTasks: currentTasks - previousTasks,
             ),
+            const SizedBox(height: 24),
+            // --- NEW: Check-in Summary Card ---
+            const Text(
+              "Check-in Summary",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            CheckinSummaryCard(checkinCounts: checkinCounts),
+
+            if (isYearly && archivedGoals != null && archivedGoals.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              const Text(
+                "Archived Goals This Year",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              ...archivedGoals.map((goal) => ArchivedGoalCard(goal: goal)),
+            ]
           ],
         );
       },
     );
   }
 }
+
+// --- NEW: Card to display check-in summary ---
+class CheckinSummaryCard extends StatelessWidget {
+  final Map<TaskCheckinStatus, int> checkinCounts;
+  const CheckinSummaryCard({super.key, required this.checkinCounts});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            CheckinRow(status: TaskCheckinStatus.done, count: checkinCounts[TaskCheckinStatus.done] ?? 0),
+            const Divider(),
+            CheckinRow(status: TaskCheckinStatus.doing, count: checkinCounts[TaskCheckinStatus.doing] ?? 0),
+            const Divider(),
+            CheckinRow(status: TaskCheckinStatus.willDo, count: checkinCounts[TaskCheckinStatus.willDo] ?? 0),
+            const Divider(),
+            CheckinRow(status: TaskCheckinStatus.wontDo, count: checkinCounts[TaskCheckinStatus.wontDo] ?? 0),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- NEW: Row for the check-in summary card ---
+class CheckinRow extends StatelessWidget {
+  final TaskCheckinStatus status;
+  final int count;
+  const CheckinRow({super.key, required this.status, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final Map<TaskCheckinStatus, dynamic> details = {
+      TaskCheckinStatus.done: {'text': 'Done', 'icon': Icons.check_circle_outline, 'color': Colors.green},
+      TaskCheckinStatus.doing: {'text': 'Doing', 'icon': Icons.directions_run, 'color': Colors.blue},
+      TaskCheckinStatus.willDo: {'text': 'Will Do', 'icon': Icons.schedule, 'color': Colors.orange},
+      TaskCheckinStatus.wontDo: {'text': 'Won\'t Do', 'icon': Icons.cancel_outlined, 'color': Colors.red},
+    };
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Icon(details[status]['icon'], color: details[status]['color']),
+          const SizedBox(width: 16),
+          Text(details[status]['text'], style: const TextStyle(fontSize: 16)),
+          const Spacer(),
+          Text(count.toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+}
+
+// --- NEW: Card to display an archived goal ---
+class ArchivedGoalCard extends StatelessWidget {
+  final Goal goal;
+  const ArchivedGoalCard({super.key, required this.goal});
+
+  @override
+  Widget build(BuildContext context) {
+    final isAchieved = goal.status == GoalStatus.achieved;
+    return Card(
+      color: isAchieved ? Colors.green.shade50 : Colors.red.shade50,
+      child: ListTile(
+        leading: Icon(
+          isAchieved ? Icons.emoji_events_rounded : Icons.flag_rounded,
+          color: isAchieved ? Colors.green.shade700 : Colors.red.shade700,
+        ),
+        title: Text(goal.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(isAchieved ? 'Achieved!' : 'Given Up'),
+      ),
+    );
+  }
+}
+
 
 class ReportCard extends StatelessWidget {
   final String timeSpent;

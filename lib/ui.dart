@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -6,11 +7,12 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+// FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 import './reports_page.dart';
 
-// --- Home Page (unchanged) ---
+// --- Home Page ---
 class HomePage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(String) onSetGoal;
@@ -50,7 +52,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchSuggestion() async {
     setState(() => _isLoading = true);
-    final suggestion = await SuggestionService.getSuggestion(_nextMilestone);
+    // FIX: Pass the active goal to the suggestion service
+    final suggestion = await SuggestionService.getSuggestion(widget.activeGoal, _nextMilestone);
     if (mounted) {
       setState(() {
         _suggestion = suggestion;
@@ -520,7 +523,7 @@ class SettingsPage extends StatelessWidget {
             leading: const Icon(Icons.notifications_rounded),
             title: const Text("Notifications"),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const NotificationsSettingsPage())),
+                builder: (_) => NotificationsSettingsPage(activeGoal: Provider.of<FirestoreService>(context, listen: false).uid == null ? null : allGoals.firstWhere((g) => g.status == GoalStatus.active)))),
           ),
           ListTile(
             leading: const Icon(Icons.help_outline_rounded),
@@ -603,7 +606,8 @@ class MyJourneyPage extends StatelessWidget {
 }
 
 class NotificationsSettingsPage extends StatefulWidget {
-  const NotificationsSettingsPage({super.key});
+  final Goal? activeGoal;
+  const NotificationsSettingsPage({super.key, this.activeGoal});
 
   @override
   _NotificationsSettingsPageState createState() =>
@@ -663,8 +667,6 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         return;
     }
 
-    // FIX: Cancel only the scheduled notifications, not all notifications.
-    // This prevents accidentally cancelling the focus mode notification.
     final prefs = await SharedPreferences.getInstance();
     final int oldNotificationCount = prefs.getInt('notification_count') ?? 0;
     for (int i = 0; i < oldNotificationCount; i++) {
@@ -672,10 +674,26 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     }
 
     for (int i = 0; i < _notificationCount; i++) {
-      scheduleNotification(
-        i, // Use index as the ID
+      String payload = '';
+      if (widget.activeGoal != null) {
+        final nextMilestone = widget.activeGoal!.milestones.firstWhere((m) => !m.isCompleted, orElse: () => Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
+        if (nextMilestone.title.isNotEmpty) {
+          final nextCheckpoint = nextMilestone.checkpoints.firstWhere((c) => !nextMilestone.completedCheckpointIds.contains(c.id), orElse: () => Checkpoint(title: ''));
+          if (nextCheckpoint.title.isNotEmpty) {
+            payload = json.encode({
+              'goalId': widget.activeGoal!.id,
+              'milestoneId': nextMilestone.id,
+              'checkpointId': nextCheckpoint.id,
+            });
+          }
+        }
+      }
+
+      scheduleReminderNotification(
+        i,
         'Milestone Reminder',
-        'Don\'t forget to work on your goals today!',
+        'How are you doing with your goals today?',
+        payload,
         _notificationTimes[i].hour,
         _notificationTimes[i].minute,
       );
@@ -772,7 +790,6 @@ class HelpPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: const [
-          // FIX: Removed non-standard emoji characters that were causing rendering issues.
           HelpTile(
             icon: Icons.track_changes_rounded,
             title: "The Power of a Clear Goal",
@@ -860,8 +877,6 @@ class GetInTouchPage extends StatelessWidget {
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url)) {
-      // It's good practice to show feedback to the user if the URL fails to launch
-      // For this app, we'll just throw an exception for debugging.
       throw Exception('Could not launch $url');
     }
   }
@@ -888,9 +903,8 @@ class GetInTouchPage extends StatelessWidget {
                 leading: const Icon(Icons.favorite_rounded, color: Colors.red),
                 title: const Text("Donate"),
                 subtitle: const Text("Support the development"),
-                // FIX: Removed markdown formatting from the URL to make it launch correctly.
                 onTap: () => _launchURL(
-                    "https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing"),
+                    "[https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing](https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing)"),
               ),
             ),
             Card(
@@ -898,9 +912,8 @@ class GetInTouchPage extends StatelessWidget {
                 leading: const Icon(Icons.code_rounded),
                 title: const Text("Contribute"),
                 subtitle: const Text("Help improve the app on GitHub"),
-                // FIX: Removed markdown formatting from the URL to make it launch correctly.
                 onTap: () => _launchURL(
-                    "https://github.com/MossesRoss/trackit/edit/main/main.dart"),
+                    "[https://github.com/MossesRoss/trackit/edit/main/main.dart](https://github.com/MossesRoss/trackit/edit/main/main.dart)"),
               ),
             ),
           ],
@@ -910,7 +923,6 @@ class GetInTouchPage extends StatelessWidget {
   }
 }
 
-// --- TimerFocusPage and other widgets are unchanged from the previous version ---
 class TimerFocusPage extends StatefulWidget {
   final Milestone milestone;
   final Function(Duration) onSessionComplete;
