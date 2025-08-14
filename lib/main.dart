@@ -11,48 +11,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'firebase_options.dart';
 
-// FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 import './ui.dart';
 import './auth_screen.dart';
+import './notification_service.dart';
 
-// --- NEW: Global navigator key to access context from background ---
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-// --- NEW: Top-level function to handle notification responses ---
-void _onNotificationResponse(NotificationResponse response) {
-  if (response.payload != null && response.payload!.isNotEmpty) {
-    final payloadData = json.decode(response.payload!);
-    final goalId = payloadData['goalId'];
-    final milestoneId = payloadData['milestoneId'];
-    final checkpointId = payloadData['checkpointId'];
-    
-    TaskCheckinStatus status;
-    switch (response.actionId) {
-      case doneActionId:
-        status = TaskCheckinStatus.done;
-        break;
-      case doingActionId:
-        status = TaskCheckinStatus.doing;
-        break;
-      case willDoActionId:
-        status = TaskCheckinStatus.willDo;
-        break;
-      case wontDoActionId:
-        status = TaskCheckinStatus.wontDo;
-        break;
-      default:
-        return; // Ignore if it's not one of our actions
-    }
-
-    // Use the navigator key to get the MainPageState and call the method
-    final mainPageState = navigatorKey.currentContext
-        ?.findAncestorStateOfType<_MainPageState>();
-    mainPageState?.recordTaskCheckin(goalId, milestoneId, checkpointId, status);
-  }
-}
-
 
 class ThemeProvider with ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.light;
@@ -75,6 +41,8 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  await NotificationService().init();
+
   const MethodChannel timezoneChannel = MethodChannel('com.example.trackit/timezone');
   String timeZoneName;
   try {
@@ -89,9 +57,6 @@ Future<void> main() async {
       tz.setLocalLocation(tz.getLocation(timeZoneName));
     }
   }
-
-  // Pass the handler function to the init method
-  await initNotifications(_onNotificationResponse);
 
   runApp(
     MultiProvider(
@@ -163,7 +128,7 @@ class MilestoneApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      navigatorKey: navigatorKey, // Assign the global key
+      navigatorKey: navigatorKey,
       title: 'Track It',
       theme: lightTheme,
       darkTheme: darkTheme,
@@ -224,7 +189,50 @@ class _MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
     _loadGoals();
+    _configureSelectNotificationSubject();
   }
+
+  void _configureSelectNotificationSubject() {
+    NotificationService().selectNotificationSubject.stream.listen((response) async {
+      debugPrint('UI received notification response: ${response.payload}');
+      // Dismiss the notification banner
+      NotificationService().cancelNotification(response.id ?? 0);
+
+      if (response.payload != null && response.payload!.isNotEmpty) {
+        final payloadData = json.decode(response.payload!);
+        final goalId = payloadData['goalId'];
+        final milestoneId = payloadData['milestoneId'];
+        final checkpointId = payloadData['checkpointId'];
+
+        TaskCheckinStatus status;
+        bool shouldToggleCheckpoint = false;
+
+        switch (response.actionId) {
+          case doneActionId:
+            status = TaskCheckinStatus.done;
+            shouldToggleCheckpoint = true;
+            break;
+          case doingActionId:
+            status = TaskCheckinStatus.doing;
+            break;
+          case willDoActionId:
+            status = TaskCheckinStatus.willDo;
+            break;
+          case wontDoActionId:
+            status = TaskCheckinStatus.wontDo;
+            break;
+          default:
+            return;
+        }
+
+        if (shouldToggleCheckpoint) {
+          toggleCheckpointByIds(goalId, milestoneId, checkpointId);
+        }
+        recordTaskCheckin(goalId, milestoneId, checkpointId, status);
+      }
+    });
+  }
+
 
   Future<void> _loadGoals() async {
     setState(() => _isLoading = true);
@@ -257,7 +265,6 @@ class _MainPageState extends State<MainPage> {
       final currentActiveGoal = _activeGoal;
       if (currentActiveGoal != null) {
         currentActiveGoal.status = GoalStatus.givenUp;
-        // Also archive the old goal
         Provider.of<FirestoreService>(context, listen: false)
             .archiveGoal(currentActiveGoal);
       }
@@ -311,7 +318,6 @@ class _MainPageState extends State<MainPage> {
       if (confirmed == true) {
         setState(() {
           _activeGoal!.status = GoalStatus.givenUp;
-          // --- NEW: Archive the goal when given up ---
           Provider.of<FirestoreService>(context, listen: false)
               .archiveGoal(_activeGoal!);
         });
@@ -340,13 +346,22 @@ class _MainPageState extends State<MainPage> {
     });
     _saveGoals();
   }
+  
+  void toggleCheckpointByIds(String goalId, String milestoneId, String checkpointId) {
+    final goal = _allGoals.firstWhere((g) => g.id == goalId, orElse: () => Goal(title: ''));
+    if (goal.title.isEmpty) return;
+
+    final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId, orElse: () => Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
+    if (milestone.title.isEmpty) return;
+
+    _toggleCheckpoint(milestone, checkpointId);
+  }
 
   void _checkForGoalCompletion() {
     if (_activeGoal != null && _activeGoal!.isCompleted) {
       setState(() {
         _activeGoal!.status = GoalStatus.achieved;
         _editMode = true;
-        // --- NEW: Archive the goal upon completion ---
         Provider.of<FirestoreService>(context, listen: false)
             .archiveGoal(_activeGoal!);
       });
@@ -390,7 +405,6 @@ class _MainPageState extends State<MainPage> {
     _saveGoals();
   }
 
-  // --- NEW: Method to handle check-in responses from notifications ---
   void recordTaskCheckin(String goalId, String milestoneId, String checkpointId, TaskCheckinStatus status) {
     setState(() {
       final goal = _allGoals.firstWhere((g) => g.id == goalId, orElse: () => Goal(title: ''));
@@ -475,4 +489,3 @@ class _MainPageState extends State<MainPage> {
     );
   }
 }
-

@@ -1,18 +1,15 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, ChangeNotifier;
+import 'package:flutter/foundation.dart' show ChangeNotifier;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/timezone.dart' as tz;
 import './models.dart';
+import './notification_service.dart'; // Import the new service
 
 // --- Auth Service (unchanged) ---
 class AuthService with ChangeNotifier {
@@ -77,7 +74,6 @@ class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   static const _localCacheKey = 'all_goals_cache';
 
-  // --- NEW: Method to archive a goal ---
   Future<void> archiveGoal(Goal goal) async {
     if (uid == null) return;
     final archiveDoc = _db.collection('archived_goals').doc(goal.id);
@@ -124,14 +120,9 @@ class FirestoreService {
     return goals;
   }
 
-  // --- UPDATED: _getPeriodData now also counts check-in statuses ---
   Future<Map<String, dynamic>> _getPeriodData(DateTime start, DateTime end, {bool isYearly = false}) async {
     final allGoals = await loadGoals();
-    if (isYearly) {
-      // For yearly reports, we might also want to fetch from archives.
-      // This is a placeholder for that logic.
-    }
-
+    
     Duration totalTime = Duration.zero;
     int tasksCompleted = 0;
     Map<TaskCheckinStatus, int> checkinCounts = {
@@ -140,14 +131,13 @@ class FirestoreService {
 
     for (final goal in allGoals) {
       for (final milestone in goal.milestones) {
-        // Time and task completion logic
         if (milestone.lastWorkedOn != null &&
             milestone.lastWorkedOn!.isAfter(start) &&
             milestone.lastWorkedOn!.isBefore(end)) {
           totalTime += milestone.timeSpent;
-          tasksCompleted += milestone.completedCheckpointIds.length;
         }
-        // Check-in counting logic
+        tasksCompleted += milestone.completedCheckpointIds.length;
+
         for (final checkin in milestone.checkins) {
           if (checkin.timestamp.isAfter(start) && checkin.timestamp.isBefore(end)) {
             checkinCounts[checkin.status] = (checkinCounts[checkin.status] ?? 0) + 1;
@@ -197,7 +187,6 @@ class FirestoreService {
     final currentData = await _getPeriodData(startOfYear, endOfYear, isYearly: true);
     final previousData = await _getPeriodData(startOfLastYear, startOfYear);
 
-    // Fetch archived goals for the year
     final querySnapshot = await _db.collection('archived_goals')
       .where('userId', isEqualTo: uid)
       .where('createdAt', isGreaterThanOrEqualTo: startOfYear.toIso8601String())
@@ -268,17 +257,16 @@ class SuggestionService {
       return "Milestone '${nextMilestone.title}' is complete! Well done!";
     }
 
-    // --- NEW: Trigger notification when suggestion changes ---
     final payload = {
       'goalId': activeGoal.id,
       'milestoneId': nextMilestone.id,
       'checkpointId': nextCheckpoint.id,
     };
-    scheduleTaskCheckinNotification(
-        100, // A unique ID for this type of notification
-        "How's it going?",
-        "Progress on: ${nextCheckpoint.title}",
-        json.encode(payload));
+    NotificationService().showTaskCheckinNotification(
+        id: 101, // Unique ID for this type of notification
+        title: "How's it going?",
+        body: "Progress on: ${nextCheckpoint.title}",
+        payload: json.encode(payload));
 
     final prompt =
         "My current milestone is '${nextMilestone.title}' due on ${DateFormat.yMMMd().format(nextMilestone.deadline)}. My next task is: ${nextCheckpoint.title}. What is a single, concise, and actionable tip to help me with this specific task? Keep it short and motivating.";
@@ -333,170 +321,3 @@ class SuggestionService {
       return _callGemini(prompt);
   }
 }
-
-// --- Notification Service ---
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
-
-const _focusChannelId = 'focus_channel_id';
-const _focusChannelName = 'Focus Mode';
-const _focusChannelDesc = 'Notification shown while in a focus session.';
-const _focusNotificationId = 99;
-
-const _reminderChannelId = 'milestone_channel_id';
-const _reminderChannelName = 'Milestone Reminders';
-const _reminderChannelDesc = 'Channel for Milestone app reminders';
-
-// --- NEW: Action IDs for notifications ---
-const String doneActionId = 'DONE_ACTION';
-const String doingActionId = 'DOING_ACTION';
-const String willDoActionId = 'WILL_DO_ACTION';
-const String wontDoActionId = 'WONT_DO_ACTION';
-
-
-Future<void> initNotifications(Function(NotificationResponse) onNotificationResponse) async {
-  if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
-    return;
-  }
-
-  // --- NEW: Define actions for Android notifications ---
-  const List<AndroidNotificationAction> actions = <AndroidNotificationAction>[
-    AndroidNotificationAction(doneActionId, 'Done', showsUserInterface: false),
-    AndroidNotificationAction(doingActionId, 'Doing', showsUserInterface: false),
-    AndroidNotificationAction(willDoActionId, 'Will Do', showsUserInterface: false),
-    AndroidNotificationAction(wontDoActionId, 'Won\'t Do', showsUserInterface: false),
-  ];
-
-  final AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-      
-  final DarwinInitializationSettings initializationSettingsIOS =
-      DarwinInitializationSettings();
-
-  final InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-    iOS: initializationSettingsIOS,
-  );
-  
-  await flutterLocalNotificationsPlugin.initialize(
-    initializationSettings,
-    onDidReceiveNotificationResponse: onNotificationResponse,
-  );
-
-  await Permission.notification.request();
-  await Permission.scheduleExactAlarm.request();
-}
-
-Future<void> showFocusNotification(String milestoneTitle) async {
-  var androidPlatformChannelSpecifics = const AndroidNotificationDetails(
-      _focusChannelId, _focusChannelName,
-      channelDescription: _focusChannelDesc,
-      importance: Importance.low,
-      priority: Priority.low,
-      ongoing: true,
-      autoCancel: false,
-  );
-  var platformChannelSpecifics =
-      NotificationDetails(android: androidPlatformChannelSpecifics);
-  
-  await flutterLocalNotificationsPlugin.show(
-    _focusNotificationId,
-    'Focusing on: $milestoneTitle',
-    'Your session is in progress...',
-    platformChannelSpecifics,
-  );
-}
-
-Future<void> cancelFocusNotification() async {
-  await flutterLocalNotificationsPlugin.cancel(_focusNotificationId);
-}
-
-// --- NEW: Function to schedule a notification with actions ---
-Future<void> scheduleTaskCheckinNotification(
-    int id, String title, String body, String payload) async {
-  if (await Permission.notification.isDenied) {
-      debugPrint("Permissions are denied. Cannot schedule notification.");
-      return;
-  }
-  
-  var androidPlatformChannelSpecifics = const AndroidNotificationDetails(
-      _reminderChannelId, _reminderChannelName,
-      channelDescription: _reminderChannelDesc,
-      importance: Importance.max,
-      priority: Priority.high,
-      actions: <AndroidNotificationAction>[
-        AndroidNotificationAction(doneActionId, 'Done'),
-        AndroidNotificationAction(doingActionId, 'Doing'),
-        AndroidNotificationAction(willDoActionId, 'Will Do'),
-        AndroidNotificationAction(wontDoActionId, 'Won\'t Do'),
-      ],
-      );
-  var platformChannelSpecifics =
-      NotificationDetails(android: androidPlatformChannelSpecifics);
-
-  try {
-    // Show immediately
-    await flutterLocalNotificationsPlugin.show(
-      id,
-      title,
-      body,
-      platformChannelSpecifics,
-      payload: payload,
-    );
-    debugPrint("Actionable Notification #$id shown successfully.");
-  } catch(e) {
-    debugPrint("Error showing notification #$id: $e");
-  }
-}
-
-Future<void> scheduleReminderNotification(
-    int id, String title, String body, String payload, int hour, int minute) async {
-  if (await Permission.notification.isDenied || await Permission.scheduleExactAlarm.isDenied) {
-      debugPrint("Permissions are denied. Cannot schedule notification.");
-      return;
-  }
-    
-  tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
-    final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
-    tz.TZDateTime scheduledDate =
-        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
-    if (scheduledDate.isBefore(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
-    }
-    return scheduledDate;
-  }
-
-  var androidPlatformChannelSpecifics = const AndroidNotificationDetails(
-      _reminderChannelId, _reminderChannelName,
-      channelDescription: _reminderChannelDesc,
-      importance: Importance.max,
-      priority: Priority.high,
-      actions: <AndroidNotificationAction>[
-        AndroidNotificationAction(doneActionId, 'Done'),
-        AndroidNotificationAction(doingActionId, 'Doing'),
-        AndroidNotificationAction(willDoActionId, 'Will Do'),
-        AndroidNotificationAction(wontDoActionId, 'Won\'t Do'),
-      ],
-      );
-  var platformChannelSpecifics =
-      NotificationDetails(android: androidPlatformChannelSpecifics);
-
-  try {
-    final scheduledTime = _nextInstanceOfTime(hour, minute);
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-      id,
-      title,
-      body,
-      scheduledTime,
-      platformChannelSpecifics,
-      payload: payload,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: DateTimeComponents.time,
-    );
-    debugPrint("Reminder #$id scheduled successfully for $scheduledTime");
-  } catch(e) {
-    debugPrint("Error scheduling reminder #$id: $e");
-  }
-}
-

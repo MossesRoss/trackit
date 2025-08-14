@@ -7,12 +7,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-// FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 import './reports_page.dart';
+import './notification_service.dart'; // Import the new service
 
-// --- Home Page ---
 class HomePage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(String) onSetGoal;
@@ -52,7 +51,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchSuggestion() async {
     setState(() => _isLoading = true);
-    // FIX: Pass the active goal to the suggestion service
     final suggestion = await SuggestionService.getSuggestion(widget.activeGoal, _nextMilestone);
     if (mounted) {
       setState(() {
@@ -107,7 +105,6 @@ class _HomePageState extends State<HomePage> {
                             padding: const EdgeInsets.all(16.0),
                             child: Row(
                               children: [
-                                // Left Side: NEW Focus Button
                                 Expanded(
                                   child: Column(
                                     children: [
@@ -133,7 +130,6 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                 ),
                                 const SizedBox(width: 16),
-                                // Right Side: Suggestion
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -214,7 +210,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// --- Focus Button with Long-Press Indicator (unchanged) ---
 class FocusButton extends StatefulWidget {
   final VoidCallback onFocusStarted;
   const FocusButton({super.key, required this.onFocusStarted});
@@ -307,7 +302,6 @@ class _FocusButtonState extends State<FocusButton> with SingleTickerProviderStat
   }
 }
 
-// --- MilestoneProgressChart (unchanged) ---
 class MilestoneProgressChart extends StatelessWidget {
   final List<Milestone> milestones;
   const MilestoneProgressChart({super.key, required this.milestones});
@@ -393,8 +387,6 @@ class MilestoneProgressChart extends StatelessWidget {
   }
 }
 
-
-// --- Milestones Page (unchanged) ---
 class MilestonesPage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(Milestone) onAddMilestone;
@@ -469,7 +461,6 @@ class MilestonesPageState extends State<MilestonesPage> {
   }
 }
 
-// --- Settings Page (unchanged) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -522,8 +513,16 @@ class SettingsPage extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.notifications_rounded),
             title: const Text("Notifications"),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => NotificationsSettingsPage(activeGoal: Provider.of<FirestoreService>(context, listen: false).uid == null ? null : allGoals.firstWhere((g) => g.status == GoalStatus.active)))),
+            onTap: () {
+               Goal? activeGoal;
+                try {
+                  activeGoal = allGoals.firstWhere((g) => g.status == GoalStatus.active);
+                } catch (e) {
+                  activeGoal = null;
+                }
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => NotificationsSettingsPage(activeGoal: activeGoal)));
+            }
           ),
           ListTile(
             leading: const Icon(Icons.help_outline_rounded),
@@ -551,7 +550,6 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// --- Other Pages and Widgets ---
 class MyJourneyPage extends StatelessWidget {
   final List<Goal> allGoals;
   const MyJourneyPage({super.key, required this.allGoals});
@@ -659,7 +657,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     await prefs.setStringList('notification_times', timeStrings);
   }
 
-  void _updateAndSaveChanges() async {
+void _updateAndSaveChanges() async {
     if (!_hasExactAlarmPermission) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             backgroundColor: Colors.red,
@@ -670,7 +668,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     final prefs = await SharedPreferences.getInstance();
     final int oldNotificationCount = prefs.getInt('notification_count') ?? 0;
     for (int i = 0; i < oldNotificationCount; i++) {
-      flutterLocalNotificationsPlugin.cancel(i);
+      NotificationService().cancelNotification(i);
     }
 
     for (int i = 0; i < _notificationCount; i++) {
@@ -689,20 +687,19 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         }
       }
 
-      scheduleReminderNotification(
-        i,
-        'Milestone Reminder',
-        'How are you doing with your goals today?',
-        payload,
-        _notificationTimes[i].hour,
-        _notificationTimes[i].minute,
+      NotificationService().scheduleReminderNotification(
+        id: i,
+        title: 'Milestone Reminder',
+        body: 'How are you doing with your goals today?',
+        payload: payload,
+        hour: _notificationTimes[i].hour,
+        minute: _notificationTimes[i].minute,
       );
     }
     _saveSettings();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text("Notification settings saved!")));
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -941,7 +938,7 @@ class _TimerFocusPageState extends State<TimerFocusPage> {
   void initState() {
     super.initState();
     _startTimer();
-    showFocusNotification(widget.milestone.title);
+    NotificationService().showFocusNotification(widget.milestone.title);
   }
 
   void _startTimer() {
@@ -955,7 +952,7 @@ class _TimerFocusPageState extends State<TimerFocusPage> {
   @override
   void dispose() {
     _timer?.cancel();
-    cancelFocusNotification();
+    NotificationService().cancelFocusNotification();
     super.dispose();
   }
 
@@ -1507,7 +1504,7 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
               alignment: Alignment.centerRight,
               child: _isSuggestingTasks
                   ? const Padding(
-                      padding: EdgeInsets.all(8.0),
+                      padding: const EdgeInsets.all(8.0),
                       child: SizedBox(
                           height: 20,
                           width: 20,
@@ -1552,4 +1549,3 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
     );
   }
 }
-
