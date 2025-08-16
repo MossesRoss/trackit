@@ -107,31 +107,6 @@ class _HomePageState extends State<HomePage> {
                               children: [
                                 Expanded(
                                   child: Column(
-                                    children: [
-                                      if (_nextMilestone != null)
-                                        FocusButton(
-                                          onFocusStarted: () =>
-                                              _startFocusMode(_nextMilestone!),
-                                        )
-                                      else
-                                        const Icon(Icons.check_circle_outline_rounded, size: 60, color: Colors.green),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        _nextMilestone != null
-                                            ? "Focus on '${_nextMilestone!.title}'"
-                                            : "All milestones complete!",
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.center,
                                     children: [
@@ -158,6 +133,31 @@ class _HomePageState extends State<HomePage> {
                                                       ?.color
                                                       ?.withOpacity(0.8)),
                                             ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      if (_nextMilestone != null)
+                                        FocusButton(
+                                          onFocusStarted: () =>
+                                              _startFocusMode(_nextMilestone!),
+                                        )
+                                      else
+                                        const Icon(Icons.check_circle_outline_rounded, size: 60, color: Colors.green),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        _nextMilestone != null
+                                            ? "Focus on '${_nextMilestone!.title}'"
+                                            : "All milestones complete!",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold),
+                                      ),
                                     ],
                                   ),
                                 ),
