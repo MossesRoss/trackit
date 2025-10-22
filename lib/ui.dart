@@ -51,7 +51,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchSuggestion() async {
     setState(() => _isLoading = true);
-    final suggestion = await SuggestionService.getSuggestion(widget.activeGoal, _nextMilestone);
+    final suggestion = await SuggestionService.getSuggestion(
+        widget.activeGoal, _nextMilestone);
     if (mounted) {
       setState(() {
         _suggestion = suggestion;
@@ -146,7 +147,10 @@ class _HomePageState extends State<HomePage> {
                                               _startFocusMode(_nextMilestone!),
                                         )
                                       else
-                                        const Icon(Icons.check_circle_outline_rounded, size: 60, color: Colors.green),
+                                        const Icon(
+                                            Icons.check_circle_outline_rounded,
+                                            size: 60,
+                                            color: Colors.green),
                                       const SizedBox(height: 8),
                                       Text(
                                         _nextMilestone != null
@@ -218,7 +222,8 @@ class FocusButton extends StatefulWidget {
   State<FocusButton> createState() => _FocusButtonState();
 }
 
-class _FocusButtonState extends State<FocusButton> with SingleTickerProviderStateMixin {
+class _FocusButtonState extends State<FocusButton>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
   @override
@@ -279,7 +284,8 @@ class _FocusButtonState extends State<FocusButton> with SingleTickerProviderStat
                 value: _controller.value,
                 strokeWidth: 6,
                 backgroundColor: Colors.grey.shade300,
-                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                    Theme.of(context).colorScheme.primary),
               ),
             ),
             Container(
@@ -320,7 +326,9 @@ class MilestoneProgressChart extends StatelessWidget {
           x: i,
           barRods: [
             BarChartRodData(
-              toY: milestone.checkpoints.isEmpty ? 0 : milestone.completedCheckpointIds.length.toDouble(),
+              toY: milestone.checkpoints.isEmpty
+                  ? 0
+                  : milestone.completedCheckpointIds.length.toDouble(),
               color: Colors.deepPurple.shade300,
               width: 16,
               borderRadius: const BorderRadius.only(
@@ -347,7 +355,9 @@ class MilestoneProgressChart extends StatelessWidget {
                   return Padding(
                     padding: const EdgeInsets.only(top: 6.0),
                     child: Text(
-                      milestones[index].title.length > 3 ? milestones[index].title.substring(0, 3) : milestones[index].title,
+                      milestones[index].title.length > 3
+                          ? milestones[index].title.substring(0, 3)
+                          : milestones[index].title,
                       style: const TextStyle(fontSize: 10),
                     ),
                   );
@@ -358,8 +368,10 @@ class MilestoneProgressChart extends StatelessWidget {
             ),
           ),
           leftTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: true, reservedSize: 28,
-             getTitlesWidget: (value, meta) {
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 28,
+              getTitlesWidget: (value, meta) {
                 if (value % 1 == 0) {
                   return Text(value.toInt().toString());
                 }
@@ -367,8 +379,10 @@ class MilestoneProgressChart extends StatelessWidget {
               },
             ),
           ),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
         borderData: FlBorderData(show: false),
         gridData: FlGridData(
@@ -439,7 +453,8 @@ class MilestonesPageState extends State<MilestonesPage> {
       body: widget.activeGoal == null
           ? const Center(child: Text("Set a main goal on the Home page first."))
           : widget.activeGoal!.milestones.isEmpty
-              ? const Center(child: Text("No milestones yet. Add one to start!"))
+              ? const Center(
+                  child: Text("No milestones yet. Add one to start!"))
               : ListView.builder(
                   padding: const EdgeInsets.all(16.0),
                   itemCount: widget.activeGoal!.milestones.length,
@@ -449,8 +464,7 @@ class MilestonesPageState extends State<MilestonesPage> {
                       key: ValueKey('${milestone.id}-${milestone.progress}'),
                       milestone: milestone,
                       isFirst: index == 0,
-                      isLast:
-                          index == widget.activeGoal!.milestones.length - 1,
+                      isLast: index == widget.activeGoal!.milestones.length - 1,
                       onToggleCheckpoint: widget.onToggleCheckpoint,
                       onDelete: () => widget.onDeleteMilestone(milestone.id),
                       editMode: widget.editMode,
@@ -511,19 +525,20 @@ class SettingsPage extends StatelessWidget {
                 builder: (_) => MyJourneyPage(allGoals: allGoals))),
           ),
           ListTile(
-            leading: const Icon(Icons.notifications_rounded),
-            title: const Text("Notifications"),
-            onTap: () {
-               Goal? activeGoal;
+              leading: const Icon(Icons.notifications_rounded),
+              title: const Text("Notifications"),
+              onTap: () {
+                Goal? activeGoal;
                 try {
-                  activeGoal = allGoals.firstWhere((g) => g.status == GoalStatus.active);
+                  activeGoal =
+                      allGoals.firstWhere((g) => g.status == GoalStatus.active);
                 } catch (e) {
                   activeGoal = null;
                 }
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => NotificationsSettingsPage(activeGoal: activeGoal)));
-            }
-          ),
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) =>
+                        NotificationsSettingsPage(activeGoal: activeGoal)));
+              }),
           ListTile(
             leading: const Icon(Icons.help_outline_rounded),
             title: const Text("Help"),
@@ -533,8 +548,8 @@ class SettingsPage extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.connect_without_contact_rounded),
             title: const Text("Get in Touch"),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const GetInTouchPage())),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const GetInTouchPage())),
           ),
           const Divider(),
           ListTile(
@@ -566,8 +581,8 @@ class MyJourneyPage extends StatelessWidget {
                 final goal = allGoals[index];
                 Color color;
                 IconData icon;
-                final String statusText =
-                    goal.status.name[0].toUpperCase() + goal.status.name.substring(1);
+                final String statusText = goal.status.name[0].toUpperCase() +
+                    goal.status.name.substring(1);
 
                 switch (goal.status) {
                   case GoalStatus.active:
@@ -590,8 +605,8 @@ class MyJourneyPage extends StatelessWidget {
                     leading: Icon(icon, color: color),
                     title: Text(goal.title,
                         style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle:
-                        Text("Set on: ${DateFormat.yMMMd().format(goal.createdAt)}"),
+                    subtitle: Text(
+                        "Set on: ${DateFormat.yMMMd().format(goal.createdAt)}"),
                     trailing: Text(statusText.toUpperCase(),
                         style: TextStyle(
                             color: color, fontWeight: FontWeight.bold)),
@@ -626,7 +641,14 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   }
 
   Future<void> _checkPermissions() async {
-    final status = await Permission.scheduleExactAlarm.status;
+    var status = await Permission.scheduleExactAlarm.status;
+
+    // If permission is not granted, actively request it.
+    if (status.isDenied) {
+      // This will open the special "Alarms & reminders" settings screen for the user.
+      status = await Permission.scheduleExactAlarm.request();
+    }
+
     if (mounted) {
       setState(() {
         _hasExactAlarmPermission = status.isGranted;
@@ -657,26 +679,38 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     await prefs.setStringList('notification_times', timeStrings);
   }
 
-void _updateAndSaveChanges() async {
+// In ui.dart, inside _NotificationsSettingsPageState
+
+  void _updateAndSaveChanges() async {
+    // Check if the widget is still mounted before using its context.
     if (!_hasExactAlarmPermission) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.red,
-            content: Text("Permission denied. Cannot schedule notifications.")));
-        return;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text("Permission denied. Cannot schedule notifications.")));
+      return;
     }
 
     final prefs = await SharedPreferences.getInstance();
     final int oldNotificationCount = prefs.getInt('notification_count') ?? 0;
+
+    // Properly await the cancellation of old notifications
     for (int i = 0; i < oldNotificationCount; i++) {
-      NotificationService().cancelNotification(i);
+      await NotificationService().cancelNotification(i);
     }
 
+    // Properly await the scheduling of new notifications
     for (int i = 0; i < _notificationCount; i++) {
       String payload = '';
       if (widget.activeGoal != null) {
-        final nextMilestone = widget.activeGoal!.milestones.firstWhere((m) => !m.isCompleted, orElse: () => Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
+        final nextMilestone = widget.activeGoal!.milestones.firstWhere(
+            (m) => !m.isCompleted,
+            orElse: () => Milestone(
+                title: '', deadline: DateTime.now(), checkpoints: []));
         if (nextMilestone.title.isNotEmpty) {
-          final nextCheckpoint = nextMilestone.checkpoints.firstWhere((c) => !nextMilestone.completedCheckpointIds.contains(c.id), orElse: () => Checkpoint(title: ''));
+          final nextCheckpoint = nextMilestone.checkpoints.firstWhere(
+              (c) => !nextMilestone.completedCheckpointIds.contains(c.id),
+              orElse: () => Checkpoint(title: ''));
           if (nextCheckpoint.title.isNotEmpty) {
             payload = json.encode({
               'goalId': widget.activeGoal!.id,
@@ -687,7 +721,7 @@ void _updateAndSaveChanges() async {
         }
       }
 
-      NotificationService().scheduleReminderNotification(
+      await NotificationService().scheduleReminderNotification(
         id: i,
         title: 'Milestone Reminder',
         body: 'How are you doing with your goals today?',
@@ -696,10 +730,16 @@ void _updateAndSaveChanges() async {
         minute: _notificationTimes[i].minute,
       );
     }
-    _saveSettings();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("Notification settings saved!")));
+
+    await _saveSettings();
+
+    // THE CRITICAL FIX: Check if the widget is still in the tree BEFORE showing the SnackBar.
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Notification settings saved!")));
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -716,14 +756,19 @@ void _updateAndSaveChanges() async {
                       padding: const EdgeInsets.all(12.0),
                       child: Column(
                         children: [
-                          const Text("Permission Required", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                          const Text("Permission Required",
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red)),
                           const SizedBox(height: 8),
                           const Text(
                             "This app needs permission to schedule exact alarms for notifications to work correctly. Please grant this permission in your phone's settings.",
-                             textAlign: TextAlign.center,
+                            textAlign: TextAlign.center,
                           ),
-                           const SizedBox(height: 8),
-                          TextButton(onPressed: openAppSettings, child: const Text("Open Settings"))
+                          const SizedBox(height: 8),
+                          TextButton(
+                              onPressed: openAppSettings,
+                              child: const Text("Open Settings"))
                         ],
                       ),
                     ),
@@ -1038,8 +1083,7 @@ class _TimerFocusPageState extends State<TimerFocusPage> {
                 bottom: 40,
                 left: 20,
                 right: 20,
-                child: Text(
-                    "Long-press or use back button to end session",
+                child: Text("Long-press or use back button to end session",
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.grey.shade500)),
               ),
@@ -1054,7 +1098,8 @@ class _TimerFocusPageState extends State<TimerFocusPage> {
 class ProgressPieChart extends StatelessWidget {
   final int completed;
   final int total;
-  const ProgressPieChart({super.key, required this.completed, required this.total});
+  const ProgressPieChart(
+      {super.key, required this.completed, required this.total});
 
   @override
   Widget build(BuildContext context) {
@@ -1184,8 +1229,8 @@ class MilestoneNode extends StatelessWidget {
         title: Text(milestone.completedCheckpointIds.contains(checkpoint.id)
             ? "Mark as Incomplete?"
             : "Mark as Complete?"),
-        content:
-            const Text("Are you sure you want to change the status of this task?"),
+        content: const Text(
+            "Are you sure you want to change the status of this task?"),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -1289,7 +1334,8 @@ class MilestoneNode extends StatelessWidget {
                         color: milestone.isUnlocked ? null : Colors.grey)),
                 subtitle: Row(
                   children: [
-                    Text('Due: ${DateFormat.yMMMd().format(milestone.deadline)}'),
+                    Text(
+                        'Due: ${DateFormat.yMMMd().format(milestone.deadline)}'),
                     const Spacer(),
                     if (milestone.timeSpent > Duration.zero) ...[
                       Icon(Icons.timer_outlined,
@@ -1300,8 +1346,7 @@ class MilestoneNode extends StatelessWidget {
                     ]
                   ],
                 ),
-                trailing:
-                    milestone.isUnlocked ? null : const SizedBox.shrink(),
+                trailing: milestone.isUnlocked ? null : const SizedBox.shrink(),
                 children: [
                   Padding(
                     padding: const EdgeInsets.all(16.0).copyWith(top: 0),
@@ -1330,8 +1375,7 @@ class MilestoneNode extends StatelessWidget {
                                                 ? TextDecoration.lineThrough
                                                 : null)),
                                     onChanged: milestone.isUnlocked
-                                        ? (val) =>
-                                            _confirmToggle(context, task)
+                                        ? (val) => _confirmToggle(context, task)
                                         : null,
                                     dense: true,
                                     contentPadding: EdgeInsets.zero,
@@ -1371,19 +1415,20 @@ class LinePainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.grey.shade300
       ..strokeWidth = 2;
-    
+
     if (!isFirst) {
-      canvas.drawLine(Offset(size.width / 2, 0), Offset(size.width / 2, size.height / 2 - 10), paint);
+      canvas.drawLine(Offset(size.width / 2, 0),
+          Offset(size.width / 2, size.height / 2 - 10), paint);
     }
     if (!isLast) {
-      canvas.drawLine(Offset(size.width / 2, size.height / 2 + 10), Offset(size.width / 2, size.height), paint);
+      canvas.drawLine(Offset(size.width / 2, size.height / 2 + 10),
+          Offset(size.width / 2, size.height), paint);
     }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
-
 
 class AddMilestoneForm extends StatefulWidget {
   final Function(Milestone) onAdd;
@@ -1434,7 +1479,8 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
           _tasksController.text = suggestions.join('\n');
         } else {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Could not get suggestions. Please check your connection or API key."),
+            content: Text(
+                "Could not get suggestions. Please check your connection or API key."),
             backgroundColor: Colors.red,
           ));
         }
@@ -1451,7 +1497,7 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
     if (!_formKey.currentState!.validate() || _selectedDate == null) {
       return;
     }
-    
+
     _createMilestone();
   }
 
@@ -1539,9 +1585,9 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                    onPressed: _submit,
-                    child: const Text('Add Milestone'),
-                  ),
+                onPressed: _submit,
+                child: const Text('Add Milestone'),
+              ),
             ),
           ],
         ),

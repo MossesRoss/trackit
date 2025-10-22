@@ -17,7 +17,6 @@ import './ui.dart';
 import './auth_screen.dart';
 import './notification_service.dart';
 
-
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class ThemeProvider with ChangeNotifier {
@@ -27,7 +26,8 @@ class ThemeProvider with ChangeNotifier {
   bool get isDarkMode => _themeMode == ThemeMode.dark;
 
   void toggleTheme() {
-    _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    _themeMode =
+        _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
   }
 }
@@ -43,7 +43,8 @@ Future<void> main() async {
 
   await NotificationService().init();
 
-  const MethodChannel timezoneChannel = MethodChannel('com.example.trackit/timezone');
+  const MethodChannel timezoneChannel =
+      MethodChannel('com.example.trackit/timezone');
   String timeZoneName;
   try {
     timeZoneName = await timezoneChannel.invokeMethod('getLocalTimezone');
@@ -55,6 +56,7 @@ Future<void> main() async {
   if (!kIsWeb) {
     if (Platform.isAndroid || Platform.isIOS) {
       tz.setLocalLocation(tz.getLocation(timeZoneName));
+      debugPrint("Timezone set to: ${tz.local.name}");
     }
   }
 
@@ -150,7 +152,8 @@ class AuthWrapper extends StatelessWidget {
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
           return const MainPage();
@@ -193,7 +196,10 @@ class _MainPageState extends State<MainPage> {
   }
 
   void _configureSelectNotificationSubject() {
-    NotificationService().selectNotificationSubject.stream.listen((response) async {
+    NotificationService()
+        .selectNotificationSubject
+        .stream
+        .listen((response) async {
       debugPrint('UI received notification response: ${response.payload}');
       // Dismiss the notification banner
       NotificationService().cancelNotification(response.id ?? 0);
@@ -232,7 +238,6 @@ class _MainPageState extends State<MainPage> {
       }
     });
   }
-
 
   Future<void> _loadGoals() async {
     setState(() => _isLoading = true);
@@ -278,13 +283,14 @@ class _MainPageState extends State<MainPage> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text("Goal Set! 🚀"),
-          content:
-              const Text("Your new goal is active. Let's add the first milestone."),
+          content: const Text(
+              "Your new goal is active. Let's add the first milestone."),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                _milestonesPageKey.currentState?.showAddMilestoneDialog(context);
+                _milestonesPageKey.currentState
+                    ?.showAddMilestoneDialog(context);
               },
               child: const Text("Let's Go!"),
             ),
@@ -346,12 +352,16 @@ class _MainPageState extends State<MainPage> {
     });
     _saveGoals();
   }
-  
-  void toggleCheckpointByIds(String goalId, String milestoneId, String checkpointId) {
-    final goal = _allGoals.firstWhere((g) => g.id == goalId, orElse: () => Goal(title: ''));
+
+  void toggleCheckpointByIds(
+      String goalId, String milestoneId, String checkpointId) {
+    final goal = _allGoals.firstWhere((g) => g.id == goalId,
+        orElse: () => Goal(title: ''));
     if (goal.title.isEmpty) return;
 
-    final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId, orElse: () => Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
+    final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId,
+        orElse: () =>
+            Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
     if (milestone.title.isEmpty) return;
 
     _toggleCheckpoint(milestone, checkpointId);
@@ -405,15 +415,20 @@ class _MainPageState extends State<MainPage> {
     _saveGoals();
   }
 
-  void recordTaskCheckin(String goalId, String milestoneId, String checkpointId, TaskCheckinStatus status) {
+  void recordTaskCheckin(String goalId, String milestoneId, String checkpointId,
+      TaskCheckinStatus status) {
     setState(() {
-      final goal = _allGoals.firstWhere((g) => g.id == goalId, orElse: () => Goal(title: ''));
+      final goal = _allGoals.firstWhere((g) => g.id == goalId,
+          orElse: () => Goal(title: ''));
       if (goal.title.isEmpty) return;
 
-      final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId, orElse: () => Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
+      final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId,
+          orElse: () =>
+              Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
       if (milestone.title.isEmpty) return;
 
-      milestone.checkins.add(TaskCheckin(checkpointId: checkpointId, status: status));
+      milestone.checkins
+          .add(TaskCheckin(checkpointId: checkpointId, status: status));
     });
     _saveGoals();
     debugPrint("Check-in recorded for $checkpointId with status $status");
@@ -437,7 +452,7 @@ class _MainPageState extends State<MainPage> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    
+
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
 
     final List<Widget> pages = [

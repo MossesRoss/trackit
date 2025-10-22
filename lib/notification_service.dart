@@ -32,9 +32,9 @@ class ReceivedNotification {
 @pragma('vm:entry-point')
 void notificationTapBackground(NotificationResponse notificationResponse) {
   // Handle your tap events here.
-  debugPrint('Notification tapped in background: ${notificationResponse.payload}');
+  debugPrint(
+      'Notification tapped in background: ${notificationResponse.payload}');
 }
-
 
 class NotificationService {
   // --- Singleton Pattern ---
@@ -46,13 +46,13 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   // --- Stream to pass notification data to the UI ---
-  final BehaviorSubject<ReceivedNotification> _didReceiveLocalNotificationSubject =
+  final BehaviorSubject<ReceivedNotification>
+      _didReceiveLocalNotificationSubject =
       BehaviorSubject<ReceivedNotification>();
-  
+
   // Stream for the UI to listen to notification responses
   final BehaviorSubject<NotificationResponse> selectNotificationSubject =
       BehaviorSubject<NotificationResponse>();
-
 
   Future<void> init() async {
     // --- Android Initialization ---
@@ -62,27 +62,31 @@ class NotificationService {
     // --- iOS Initialization ---
     final DarwinInitializationSettings initializationSettingsDarwin =
         DarwinInitializationSettings(
-      onDidReceiveLocalNotification: (int id, String? title, String? body, String? payload) async {
+      onDidReceiveLocalNotification:
+          (int id, String? title, String? body, String? payload) async {
         _didReceiveLocalNotificationSubject.add(
-          ReceivedNotification(id: id, title: title, body: body, payload: payload),
+          ReceivedNotification(
+              id: id, title: title, body: body, payload: payload),
         );
       },
     );
 
     // --- General Initialization ---
-    final InitializationSettings initializationSettings = InitializationSettings(
+    final InitializationSettings initializationSettings =
+        InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsDarwin,
     );
 
     await _flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse notificationResponse) {
+      onDidReceiveNotificationResponse:
+          (NotificationResponse notificationResponse) {
         selectNotificationSubject.add(notificationResponse);
       },
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
-     debugPrint("Notification Service Initialized.");
+    debugPrint("Notification Service Initialized.");
   }
 
   // --- Method to schedule a recurring reminder ---
@@ -128,12 +132,13 @@ class NotificationService {
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.time,
       );
-      debugPrint("SUCCESS: Scheduled reminder #$id for $scheduledDate with payload: $payload");
+      debugPrint(
+          "SUCCESS: Scheduled reminder #$id for $scheduledDate with payload: $payload");
     } catch (e) {
       debugPrint("ERROR scheduling reminder #$id: $e");
     }
   }
-  
+
   // --- Method to show an immediate check-in notification ---
   Future<void> showTaskCheckinNotification({
     required int id,
@@ -141,7 +146,7 @@ class NotificationService {
     required String body,
     required String payload,
   }) async {
-     const AndroidNotificationDetails androidNotificationDetails =
+    const AndroidNotificationDetails androidNotificationDetails =
         AndroidNotificationDetails(
       'checkin_channel_id',
       'Task Check-ins',
@@ -168,25 +173,28 @@ class NotificationService {
         notificationDetails,
         payload: payload,
       );
-       debugPrint("SUCCESS: Shown check-in notification #$id with payload: $payload");
+      debugPrint(
+          "SUCCESS: Shown check-in notification #$id with payload: $payload");
     } catch (e) {
-       debugPrint("ERROR showing check-in notification #$id: $e");
+      debugPrint("ERROR showing check-in notification #$id: $e");
     }
   }
 
   // --- Method to show a persistent notification for the focus session ---
   Future<void> showFocusNotification(String milestoneTitle) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-        'focus_channel_id', 'Focus Mode',
-        channelDescription: 'Notification shown while in a focus session.',
-        importance: Importance.low,
-        priority: Priority.low,
-        ongoing: true,
-        autoCancel: false,
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+      'focus_channel_id',
+      'Focus Mode',
+      channelDescription: 'Notification shown while in a focus session.',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
     );
     const NotificationDetails platformChannelSpecifics =
         NotificationDetails(android: androidPlatformChannelSpecifics);
-    
+
     await _flutterLocalNotificationsPlugin.show(
       99, // Unique ID for focus notification
       'Focusing on: $milestoneTitle',
@@ -200,7 +208,6 @@ class NotificationService {
     await _flutterLocalNotificationsPlugin.cancel(99);
   }
 
-
   // --- Helper to calculate next notification time ---
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
@@ -208,6 +215,7 @@ class NotificationService {
         tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
     if (scheduledDate.isBefore(now)) {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
+      debugPrint("Current time: $now, Scheduled time: $scheduledDate");
     }
     return scheduledDate;
   }
