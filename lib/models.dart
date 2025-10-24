@@ -28,7 +28,6 @@ class TaskCheckin {
       );
 }
 
-
 // Enum for the status of a goal.
 enum GoalStatus { active, achieved, givenUp }
 
@@ -70,6 +69,10 @@ class Goal {
 
   int get totalTasks => milestones.fold(0, (sum, m) => sum + m.checkpoints.length);
   int get completedTasks => milestones.fold(0, (sum, m) => sum + m.completedCheckpointIds.length);
+
+  // --- NEW: Getter for total time spent on the goal ---
+  Duration get totalTimeSpent =>
+      milestones.fold(Duration.zero, (sum, m) => sum + m.timeSpent);
 
   bool get isCompleted =>
       milestones.isNotEmpty && totalTasks > 0 && totalTasks == completedTasks;
@@ -153,9 +156,10 @@ class Milestone {
           ? DateTime.parse(json['lastWorkedOn'])
           : null,
       // Handle potentially null check-ins for backward compatibility
-      checkins: json['checkins'] == null 
-          ? [] 
-          : List<TaskCheckin>.from((json['checkins'] as List).map((c) => TaskCheckin.fromJson(c))),
+      checkins: json['checkins'] == null
+          ? []
+          : List<TaskCheckin>.from(
+              (json['checkins'] as List).map((c) => TaskCheckin.fromJson(c))),
     );
   }
 }

@@ -1,12 +1,61 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart'; // --- NEW: Import fl_chart ---
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 // FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 
+// --- NEW: Moved ProgressPieChart from ui.dart ---
+class ProgressPieChart extends StatelessWidget {
+  final int completed;
+  final int total;
+  const ProgressPieChart(
+      {super.key, required this.completed, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final double percentage = total == 0 ? 0 : completed / total;
+    // --- MODIFIED: Added standard framework (border) ---
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).dividerColor,
+          width: 2,
+        ),
+      ),
+      child: PieChart(
+        PieChartData(
+          sections: [
+            PieChartSectionData(
+                color: Colors.green.shade400,
+                value: percentage * 100,
+                title: '${(percentage * 100).toStringAsFixed(0)}%',
+                radius: 50,
+                titleStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
+            PieChartSectionData(
+              color: Colors.grey.shade200,
+              value: (1 - percentage) * 100,
+              title: '',
+              radius: 50,
+            ),
+          ],
+          centerSpaceRadius: 40,
+          sectionsSpace: 2,
+        ),
+      ),
+    );
+  }
+}
+
 class ReportsPage extends StatefulWidget {
-  const ReportsPage({super.key});
+  // --- NEW: Added activeGoal ---
+  final Goal? activeGoal;
+  const ReportsPage({super.key, this.activeGoal});
 
   @override
   State<ReportsPage> createState() => _ReportsPageState();
@@ -31,7 +80,7 @@ class _ReportsPageState extends State<ReportsPage>
   @override
   Widget build(BuildContext context) {
     final firestoreService = Provider.of<FirestoreService>(context);
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Reports'),
@@ -50,6 +99,8 @@ class _ReportsPageState extends State<ReportsPage>
           ReportView(
             title: 'Weekly Report',
             reportFuture: firestoreService.getWeeklyReport(),
+            // --- NEW: Pass activeGoal to weekly report ---
+            activeGoal: widget.activeGoal,
           ),
           ReportView(
             title: 'Monthly Report',
@@ -70,12 +121,15 @@ class ReportView extends StatelessWidget {
   final String title;
   final Future<Map<String, dynamic>> reportFuture;
   final bool isYearly;
+  // --- NEW: Added activeGoal ---
+  final Goal? activeGoal;
 
   const ReportView({
     super.key,
     required this.title,
     required this.reportFuture,
     this.isYearly = false,
+    this.activeGoal, // --- NEW ---
   });
 
   String _formatDuration(Duration duration) {
@@ -102,10 +156,13 @@ class ReportView extends StatelessWidget {
         }
 
         final reportData = snapshot.data!;
-        final currentPeriod = reportData['currentPeriod'] as Map<String, dynamic>;
-        final previousPeriod = reportData['previousPeriod'] as Map<String, dynamic>;
+        final currentPeriod =
+            reportData['currentPeriod'] as Map<String, dynamic>;
+        final previousPeriod =
+            reportData['previousPeriod'] as Map<String, dynamic>;
         final summary = reportData['summary'] as String?;
-        final checkinCounts = currentPeriod['checkinCounts'] as Map<TaskCheckinStatus, int>;
+        final checkinCounts =
+            currentPeriod['checkinCounts'] as Map<TaskCheckinStatus, int>;
         final archivedGoals = reportData['archivedGoals'] as List<Goal>?;
 
         final Duration currentDuration = currentPeriod['timeSpent'];
@@ -116,6 +173,24 @@ class ReportView extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // --- NEW: Display Pie Chart if activeGoal is provided ---
+            if (activeGoal != null && activeGoal!.totalTasks > 0) ...[
+              const Text(
+                "Overall Goal Progress",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 200,
+                child: ProgressPieChart(
+                  completed: activeGoal!.completedTasks,
+                  total: activeGoal!.totalTasks,
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+            // --- End of new section ---
+
             if (summary != null && summary.isNotEmpty) ...[
               const Text(
                 "Your Monthly Summary",
@@ -142,7 +217,8 @@ class ReportView extends StatelessWidget {
             ReportCard(
               timeSpent: _formatDuration(currentDuration),
               tasksCompleted: currentTasks.toString(),
-              comparisonTime: currentDuration.inSeconds - previousDuration.inSeconds,
+              comparisonTime:
+                  currentDuration.inSeconds - previousDuration.inSeconds,
               comparisonTasks: currentTasks - previousTasks,
             ),
             const SizedBox(height: 24),
@@ -182,13 +258,21 @@ class CheckinSummaryCard extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            CheckinRow(status: TaskCheckinStatus.done, count: checkinCounts[TaskCheckinStatus.done] ?? 0),
+            CheckinRow(
+                status: TaskCheckinStatus.done,
+                count: checkinCounts[TaskCheckinStatus.done] ?? 0),
             const Divider(),
-            CheckinRow(status: TaskCheckinStatus.doing, count: checkinCounts[TaskCheckinStatus.doing] ?? 0),
+            CheckinRow(
+                status: TaskCheckinStatus.doing,
+                count: checkinCounts[TaskCheckinStatus.doing] ?? 0),
             const Divider(),
-            CheckinRow(status: TaskCheckinStatus.willDo, count: checkinCounts[TaskCheckinStatus.willDo] ?? 0),
+            CheckinRow(
+                status: TaskCheckinStatus.willDo,
+                count: checkinCounts[TaskCheckinStatus.willDo] ?? 0),
             const Divider(),
-            CheckinRow(status: TaskCheckinStatus.wontDo, count: checkinCounts[TaskCheckinStatus.wontDo] ?? 0),
+            CheckinRow(
+                status: TaskCheckinStatus.wontDo,
+                count: checkinCounts[TaskCheckinStatus.wontDo] ?? 0),
           ],
         ),
       ),
@@ -205,10 +289,26 @@ class CheckinRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Map<TaskCheckinStatus, dynamic> details = {
-      TaskCheckinStatus.done: {'text': 'Done', 'icon': Icons.check_circle_outline, 'color': Colors.green},
-      TaskCheckinStatus.doing: {'text': 'Doing', 'icon': Icons.directions_run, 'color': Colors.blue},
-      TaskCheckinStatus.willDo: {'text': 'Will Do', 'icon': Icons.schedule, 'color': Colors.orange},
-      TaskCheckinStatus.wontDo: {'text': 'Won\'t Do', 'icon': Icons.cancel_outlined, 'color': Colors.red},
+      TaskCheckinStatus.done: {
+        'text': 'Done',
+        'icon': Icons.check_circle_outline,
+        'color': Colors.green
+      },
+      TaskCheckinStatus.doing: {
+        'text': 'Doing',
+        'icon': Icons.directions_run,
+        'color': Colors.blue
+      },
+      TaskCheckinStatus.willDo: {
+        'text': 'Will Do',
+        'icon': Icons.schedule,
+        'color': Colors.orange
+      },
+      TaskCheckinStatus.wontDo: {
+        'text': 'Won\'t Do',
+        'icon': Icons.cancel_outlined,
+        'color': Colors.red
+      },
     };
 
     return Padding(
@@ -219,7 +319,8 @@ class CheckinRow extends StatelessWidget {
           const SizedBox(width: 16),
           Text(details[status]['text'], style: const TextStyle(fontSize: 16)),
           const Spacer(),
-          Text(count.toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(count.toString(),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -241,13 +342,13 @@ class ArchivedGoalCard extends StatelessWidget {
           isAchieved ? Icons.emoji_events_rounded : Icons.flag_rounded,
           color: isAchieved ? Colors.green.shade700 : Colors.red.shade700,
         ),
-        title: Text(goal.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title:
+            Text(goal.title, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(isAchieved ? 'Achieved!' : 'Given Up'),
       ),
     );
   }
 }
-
 
 class ReportCard extends StatelessWidget {
   final String timeSpent;
@@ -312,15 +413,15 @@ class ReportRow extends StatelessWidget {
     final Color color = comparisonValue >= 0 ? Colors.green : Colors.red;
     final IconData trendIcon =
         comparisonValue >= 0 ? Icons.trending_up : Icons.trending_down;
-    
+
     String comparisonText;
     if (isTime) {
       final duration = Duration(seconds: comparisonValue.abs());
-      comparisonText = "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
+      comparisonText =
+          "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
     } else {
       comparisonText = comparisonValue.abs().toString();
     }
-
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -353,4 +454,3 @@ class ReportRow extends StatelessWidget {
     );
   }
 }
-

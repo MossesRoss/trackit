@@ -11,6 +11,7 @@ import './models.dart';
 import './services.dart';
 import './reports_page.dart';
 import './notification_service.dart'; // Import the new service
+import './guide_page.dart'; // --- NEW: Import the new guide page ---
 
 class HomePage extends StatefulWidget {
   final Goal? activeGoal;
@@ -31,7 +32,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _suggestion = "";
-  bool _isLoading = false;
+  bool _isLoading = true; // --- MODIFIED: Start as true ---
 
   Milestone? get _nextMilestone {
     if (widget.activeGoal == null) return null;
@@ -51,31 +52,65 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchSuggestion() async {
     setState(() => _isLoading = true);
-    final suggestion = await SuggestionService.getSuggestion(
+
+    final prefs = await SharedPreferences.getInstance();
+    final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final String? currentMilestoneId = _nextMilestone?.id;
+
+    // --- NEW: Check cache first ---
+    final String? cachedDate = prefs.getString('suggestion_cache_date');
+    final String? cachedMilestoneId =
+        prefs.getString('suggestion_cache_milestone_id');
+    final String? cachedSuggestion =
+        prefs.getString('suggestion_cache_content');
+
+    if (cachedDate == currentDate &&
+        cachedMilestoneId == currentMilestoneId &&
+        cachedSuggestion != null) {
+      if (mounted) {
+        setState(() {
+          _suggestion = cachedSuggestion;
+          _isLoading = false;
+        });
+      }
+      return; // Use cached data
+    }
+
+    // --- No valid cache, fetch new suggestion ---
+    final result = await SuggestionService.getSuggestion(
         widget.activeGoal, _nextMilestone);
+
     if (mounted) {
+      String textToShow;
+      if (result.suggestion != null) {
+        textToShow = result.suggestion!;
+        // Save to cache
+        await prefs.setString('suggestion_cache_date', currentDate);
+        await prefs.setString(
+            'suggestion_cache_milestone_id', currentMilestoneId ?? '');
+        await prefs.setString('suggestion_cache_content', textToShow);
+      } else {
+        // --- NEW: Handle errors and get fallback ---
+        if (result.error == "NO_API_KEY") {
+          textToShow =
+              "Please set your Gemini API key in Settings to get AI suggestions.";
+        } else {
+          // API error or network error, get a quote
+          textToShow = await QuoteService.getQuote();
+        }
+      }
+
       setState(() {
-        _suggestion = suggestion;
+        _suggestion = textToShow;
         _isLoading = false;
       });
     }
   }
 
-  void _startFocusMode(Milestone milestone) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (context) => TimerFocusPage(
-        milestone: milestone,
-        onSessionComplete: (duration) {
-          widget.onTimeAdd(milestone.id, duration);
-        },
-      ),
-      fullscreenDialog: true,
-    ));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // --- MODIFIED: AppBar title is now back to the goal title ---
       appBar: AppBar(
         title: Text(widget.activeGoal?.title ?? 'Track It'),
         actions: [
@@ -92,215 +127,263 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(16.0),
           child: widget.activeGoal == null
               ? GoalSetterCard(onSetGoal: widget.onSetGoal)
-              : (widget.activeGoal!.milestones.isEmpty)
-                  ? const Center(
-                      child: Text(
-                          "No milestones yet. Add one on the Milestones page to see your progress!"))
-                  : ListView(
-                      children: [
-                        Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.lightbulb_outline_rounded,
-                                          size: 24,
-                                          color: Colors.amber.shade700),
-                                      const SizedBox(height: 8),
-                                      _isLoading
-                                          ? const Center(
-                                              child: SizedBox(
-                                                  width: 20,
-                                                  height: 20,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                          strokeWidth: 2)))
-                                          : Text(
-                                              _suggestion,
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(
-                                                  fontSize: 14,
-                                                  color: Theme.of(context)
-                                                      .textTheme
-                                                      .bodyMedium
-                                                      ?.color
-                                                      ?.withOpacity(0.8)),
-                                            ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    children: [
-                                      if (_nextMilestone != null)
-                                        FocusButton(
-                                          onFocusStarted: () =>
-                                              _startFocusMode(_nextMilestone!),
-                                        )
-                                      else
-                                        const Icon(
-                                            Icons.check_circle_outline_rounded,
-                                            size: 60,
-                                            color: Colors.green),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        _nextMilestone != null
-                                            ? "Focus on '${_nextMilestone!.title}'"
-                                            : "All milestones complete!",
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
+              // --- MODIFIED: New UI for active goal ---
+              : Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // --- REMOVED: Goal title Text widget removed from body ---
+                    const SizedBox(height: 40),
+                    if (_nextMilestone != null)
+                      GoalTimerCircle(
+                        // Pass key to update when goal time changes
+                        key: ValueKey(
+                            widget.activeGoal!.totalTimeSpent.inSeconds),
+                        goal: widget.activeGoal!,
+                        nextMilestone: _nextMilestone!,
+                        onTimeAdd: widget.onTimeAdd,
+                      )
+                    else
+                      const Center(
+                          child: Text("All milestones complete! 🎉",
+                              style: TextStyle(fontSize: 18))),
+                    const SizedBox(height: 40),
+                    _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : Text(
+                            _suggestion,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontStyle: FontStyle.italic,
+                                color: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.color
+                                    ?.withOpacity(0.8)),
                           ),
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          "Overall Progress",
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 200,
-                          child: ProgressPieChart(
-                            completed: widget.activeGoal?.completedTasks ?? 0,
-                            total: widget.activeGoal?.totalTasks ?? 0,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          "Milestone Breakdown",
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 200,
-                          child: Card(
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: BorderSide(
-                                    color: Theme.of(context).dividerColor)),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: MilestoneProgressChart(
-                                  milestones:
-                                      widget.activeGoal?.milestones ?? []),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    const Spacer(),
+                  ],
+                ),
         ),
       ),
     );
   }
 }
 
-class FocusButton extends StatefulWidget {
-  final VoidCallback onFocusStarted;
-  const FocusButton({super.key, required this.onFocusStarted});
+// --- NEW: Widget for the animated timer circle ---
+class GoalTimerCircle extends StatefulWidget {
+  final Goal goal;
+  final Milestone nextMilestone;
+  final Function(String, Duration) onTimeAdd;
+
+  const GoalTimerCircle({
+    super.key,
+    required this.goal,
+    required this.nextMilestone,
+    required this.onTimeAdd,
+  });
 
   @override
-  State<FocusButton> createState() => _FocusButtonState();
+  State<GoalTimerCircle> createState() => _GoalTimerCircleState();
 }
 
-class _FocusButtonState extends State<FocusButton>
+class _GoalTimerCircleState extends State<GoalTimerCircle>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late AnimationController _animationController;
+
+  // Timer state
+  Timer? _timer;
+  int _secondsElapsed = 0;
+  bool _isTimerRunning = false;
+
+  // UI fade state
+  bool _showTimer = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+    _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 750),
+      duration: const Duration(milliseconds: 750), // Default start duration
     )..addListener(() {
         setState(() {});
       });
 
-    _controller.addStatusListener((status) {
+    _animationController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        widget.onFocusStarted();
-        _controller.reset();
+        // --- MODIFIED: Check if timer is running to decide action ---
+        if (_isTimerRunning) {
+          // Animation complete, STOP the timer
+          _stopTimer();
+        } else {
+          // Animation complete, START the timer
+          _startTimer();
+        }
       }
     });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _animationController.dispose();
+    _timer?.cancel();
+    // Ensure notification is cancelled if widget is disposed
+    if (_isTimerRunning) {
+      NotificationService().cancelFocusNotification();
+    }
     super.dispose();
   }
 
+  void _startTimer() {
+    setState(() {
+      _isTimerRunning = true;
+      _showTimer = true; // Fade to timer
+    });
+
+    NotificationService().showFocusNotification(
+      widget.nextMilestone.title,
+      // Payload to reopen the app
+      json.encode({'action': 'OPEN_HOME'}),
+    );
+
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _secondsElapsed++;
+      });
+    });
+  }
+
+  void _stopTimer() {
+    _timer?.cancel();
+    NotificationService().cancelFocusNotification();
+
+    if (_secondsElapsed > 0) {
+      widget.onTimeAdd(
+          widget.nextMilestone.id, Duration(seconds: _secondsElapsed));
+    }
+
+    setState(() {
+      _secondsElapsed = 0;
+      _isTimerRunning = false;
+      _showTimer = false; // Fade back to total hours
+      _animationController.reset();
+    });
+  }
+
+  // --- Long press gesture handlers ---
   void _onLongPressStart(LongPressStartDetails details) {
-    _controller.forward();
+    // --- MODIFIED: Set duration based on timer state ---
+    if (_isTimerRunning) {
+      // Set shorter duration for STOP animation
+      _animationController.duration = const Duration(milliseconds: 400);
+    } else {
+      // Set longer duration for START animation
+      _animationController.duration = const Duration(milliseconds: 750);
+    }
+    _animationController.forward();
   }
 
   void _onLongPressEnd(LongPressEndDetails details) {
-    if (_controller.status != AnimationStatus.completed) {
-      _controller.reverse();
+    if (_animationController.status != AnimationStatus.completed) {
+      _animationController.reverse();
     }
+  }
+
+  // --- Tap handler ---
+  void _onTap() {
+    // --- MODIFIED: Only show a hint, do not stop timer ---
+    if (_isTimerRunning) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Hold the circle to stop the session."),
+        duration: Duration(seconds: 2),
+      ));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Hold the circle to start a focus session."),
+        duration: Duration(seconds: 2),
+      ));
+    }
+  }
+
+  String _formatTotalHours(Duration duration) {
+    if (duration.inHours > 0) {
+      return "${duration.inHours} Hours";
+    }
+    if (duration.inMinutes > 0) {
+      return "${duration.inMinutes} Mins";
+    }
+    return "${duration.inSeconds} Secs";
+  }
+
+  String _formatRunningTime(int totalSeconds) {
+    final duration = Duration(seconds: totalSeconds);
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = twoDigits(duration.inHours);
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return "$hours:$minutes:$seconds";
   }
 
   @override
   Widget build(BuildContext context) {
+    final Color primaryColor = Theme.of(context).colorScheme.primary;
+
     return GestureDetector(
       onLongPressStart: _onLongPressStart,
       onLongPressEnd: _onLongPressEnd,
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Hold the button to start a focus session."),
-          duration: Duration(seconds: 2),
-        ));
-      },
+      onTap: _onTap,
       child: SizedBox(
-        width: 80,
-        height: 80,
+        width: 200,
+        height: 200,
         child: Stack(
           alignment: Alignment.center,
           children: [
+            // Animation ring
             SizedBox(
-              width: 70,
-              height: 70,
+              width: 200,
+              height: 200,
               child: CircularProgressIndicator(
-                value: _controller.value,
-                strokeWidth: 6,
+                value: _animationController.value,
+                strokeWidth: 10,
                 backgroundColor: Colors.grey.shade300,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                    Theme.of(context).colorScheme.primary),
+                valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
               ),
             ),
+            // Background circle
             Container(
-              width: 60,
-              height: 60,
+              width: 180,
+              height: 180,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                color: primaryColor.withOpacity(0.1),
               ),
-              child: Icon(
-                Icons.center_focus_strong_rounded,
-                size: 30,
-                color: Theme.of(context).colorScheme.primary,
+            ),
+            // AnimatedCrossFade for text
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 300),
+              // Show timer text if _showTimer is true
+              firstChild: Text(
+                _formatRunningTime(_secondsElapsed),
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  color: primaryColor,
+                  fontFamily: 'monospace',
+                ),
               ),
-            )
+              // Show total hours text if _showTimer is false
+              secondChild: Text(
+                _formatTotalHours(widget.goal.totalTimeSpent),
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  color: primaryColor,
+                ),
+              ),
+              crossFadeState: _showTimer
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+            ),
           ],
         ),
       ),
@@ -308,99 +391,7 @@ class _FocusButtonState extends State<FocusButton>
   }
 }
 
-class MilestoneProgressChart extends StatelessWidget {
-  final List<Milestone> milestones;
-  const MilestoneProgressChart({super.key, required this.milestones});
-
-  @override
-  Widget build(BuildContext context) {
-    if (milestones.isEmpty) {
-      return const Center(child: Text("No milestones to show."));
-    }
-
-    final barGroups = <BarChartGroupData>[];
-    for (int i = 0; i < milestones.length; i++) {
-      final milestone = milestones[i];
-      barGroups.add(
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: milestone.checkpoints.isEmpty
-                  ? 0
-                  : milestone.completedCheckpointIds.length.toDouble(),
-              color: Colors.deepPurple.shade300,
-              width: 16,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(4),
-                topRight: Radius.circular(4),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceAround,
-        barGroups: barGroups,
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (double value, TitleMeta meta) {
-                final index = value.toInt();
-                if (index >= 0 && index < milestones.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6.0),
-                    child: Text(
-                      milestones[index].title.length > 3
-                          ? milestones[index].title.substring(0, 3)
-                          : milestones[index].title,
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  );
-                }
-                return const Text('');
-              },
-              reservedSize: 28,
-            ),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 28,
-              getTitlesWidget: (value, meta) {
-                if (value % 1 == 0) {
-                  return Text(value.toInt().toString());
-                }
-                return const Text('');
-              },
-            ),
-          ),
-          topTitles:
-              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles:
-              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        ),
-        borderData: FlBorderData(show: false),
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 1,
-          getDrawingHorizontalLine: (value) {
-            return FlLine(
-              color: Theme.of(context).dividerColor,
-              strokeWidth: 1,
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
+// --- MilestonesPage (Unchanged) ---
 class MilestonesPage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(Milestone) onAddMilestone;
@@ -475,6 +466,7 @@ class MilestonesPageState extends State<MilestonesPage> {
   }
 }
 
+// --- FIX: Rebuild the entire SettingsPage widget ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -490,9 +482,64 @@ class SettingsPage extends StatelessWidget {
       required this.onEditModeChanged,
       required this.allGoals});
 
+  // --- Dialog to set API Key ---
+  void _showApiKeyDialog(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    final _apiKeyController =
+        TextEditingController(text: prefs.getString('gemini_api_key'));
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Set Gemini API Key"),
+          content: TextField(
+            controller: _apiKeyController,
+            decoration: const InputDecoration(labelText: "API Key"),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await prefs.setString(
+                    'gemini_api_key', _apiKeyController.text.trim());
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("API Key saved!")));
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // --- _launchURL method ---
+  Future<void> _launchURL(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url)) {
+      throw Exception('Could not launch $url');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context, listen: false);
+
+    // --- Find the active goal to pass to ReportsPage ---
+    Goal? activeGoal;
+    try {
+      activeGoal = allGoals.firstWhere((g) => g.status == GoalStatus.active);
+    } catch (e) {
+      activeGoal = null;
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
@@ -510,12 +557,21 @@ class SettingsPage extends StatelessWidget {
             onChanged: onEditModeChanged,
             secondary: const Icon(Icons.edit_rounded),
           ),
+          // --- API Key Tile ---
+          ListTile(
+            leading: const Icon(Icons.api_rounded),
+            title: const Text("Gemini API Key"),
+            subtitle: const Text("Set your personal API key for AI features"),
+            onTap: () => _showApiKeyDialog(context),
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.assessment_rounded),
             title: const Text("Reports"),
             subtitle: const Text("View your weekly and monthly progress"),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const ReportsPage())),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                // --- MODIFIED: Pass the activeGoal to ReportsPage ---
+                builder: (_) => ReportsPage(activeGoal: activeGoal))),
           ),
           ListTile(
             leading: const Icon(Icons.history_rounded),
@@ -528,22 +584,69 @@ class SettingsPage extends StatelessWidget {
               leading: const Icon(Icons.notifications_rounded),
               title: const Text("Notifications"),
               onTap: () {
-                Goal? activeGoal;
-                try {
-                  activeGoal =
-                      allGoals.firstWhere((g) => g.status == GoalStatus.active);
-                } catch (e) {
-                  activeGoal = null;
-                }
                 Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) =>
                         NotificationsSettingsPage(activeGoal: activeGoal)));
               }),
+          // --- MODIFIED: "Help" is now "Guide" ---
           ListTile(
             leading: const Icon(Icons.help_outline_rounded),
-            title: const Text("Help"),
+            title: const Text("How to Use (Guide)"),
             onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const HelpPage())),
+                .push(MaterialPageRoute(builder: (_) => const GuidePage())),
+          ),
+          // --- NEW: Technical Help section ---
+          ExpansionTile(
+            leading: const Icon(Icons.vpn_key_rounded),
+            title: const Text("Technical Help"),
+            subtitle: const Text("How to get your API key"),
+            children: [
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0)
+                        .copyWith(left: 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "To use the AI suggestion features, you need a free Gemini API key from Google's AI Studio.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "1. Go to aistudio.google.com on a computer.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const Text(
+                      "2. Sign in with your Google account.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const Text(
+                      "3. Click 'Get API key' on the left menu.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const Text(
+                      "4. Click 'Create API key in new project'.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const Text(
+                      "5. Copy the long string of letters and numbers.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const Text(
+                      "6. Come back here and paste it in the 'Gemini API Key' setting above.",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () =>
+                          _launchURL("https://aistudio.google.com/"),
+                      child: const Text("Open Google AI Studio"),
+                    )
+                  ],
+                ),
+              )
+            ],
           ),
           ListTile(
             leading: const Icon(Icons.connect_without_contact_rounded),
@@ -565,354 +668,7 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class MyJourneyPage extends StatelessWidget {
-  final List<Goal> allGoals;
-  const MyJourneyPage({super.key, required this.allGoals});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("My Journey")),
-      body: allGoals.isEmpty
-          ? const Center(child: Text("Your journey hasn't started yet!"))
-          : ListView.builder(
-              itemCount: allGoals.length,
-              itemBuilder: (context, index) {
-                final goal = allGoals[index];
-                Color color;
-                IconData icon;
-                final String statusText = goal.status.name[0].toUpperCase() +
-                    goal.status.name.substring(1);
-
-                switch (goal.status) {
-                  case GoalStatus.active:
-                    color = Colors.amber.shade700;
-                    icon = Icons.flag_rounded;
-                    break;
-                  case GoalStatus.achieved:
-                    color = Colors.green;
-                    icon = Icons.check_circle_rounded;
-                    break;
-                  case GoalStatus.givenUp:
-                    color = Colors.red;
-                    icon = Icons.cancel_rounded;
-                    break;
-                }
-                return Card(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: ListTile(
-                    leading: Icon(icon, color: color),
-                    title: Text(goal.title,
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(
-                        "Set on: ${DateFormat.yMMMd().format(goal.createdAt)}"),
-                    trailing: Text(statusText.toUpperCase(),
-                        style: TextStyle(
-                            color: color, fontWeight: FontWeight.bold)),
-                  ),
-                );
-              },
-            ),
-    );
-  }
-}
-
-class NotificationsSettingsPage extends StatefulWidget {
-  final Goal? activeGoal;
-  const NotificationsSettingsPage({super.key, this.activeGoal});
-
-  @override
-  _NotificationsSettingsPageState createState() =>
-      _NotificationsSettingsPageState();
-}
-
-class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
-  int _notificationCount = 1;
-  List<TimeOfDay> _notificationTimes = [const TimeOfDay(hour: 9, minute: 0)];
-  bool _isLoading = true;
-  bool _hasExactAlarmPermission = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
-    _checkPermissions();
-  }
-
-  Future<void> _checkPermissions() async {
-    var status = await Permission.scheduleExactAlarm.status;
-
-    // If permission is not granted, actively request it.
-    if (status.isDenied) {
-      // This will open the special "Alarms & reminders" settings screen for the user.
-      status = await Permission.scheduleExactAlarm.request();
-    }
-
-    if (mounted) {
-      setState(() {
-        _hasExactAlarmPermission = status.isGranted;
-      });
-    }
-  }
-
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _notificationCount = prefs.getInt('notification_count') ?? 1;
-      final timeStrings =
-          prefs.getStringList('notification_times') ?? ['09:00'];
-      _notificationTimes = timeStrings.map((t) {
-        final parts = t.split(':');
-        return TimeOfDay(
-            hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-      }).toList();
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('notification_count', _notificationCount);
-    final timeStrings =
-        _notificationTimes.map((t) => '${t.hour}:${t.minute}').toList();
-    await prefs.setStringList('notification_times', timeStrings);
-  }
-
-// In ui.dart, inside _NotificationsSettingsPageState
-
-  void _updateAndSaveChanges() async {
-    // Check if the widget is still mounted before using its context.
-    if (!_hasExactAlarmPermission) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          backgroundColor: Colors.red,
-          content: Text("Permission denied. Cannot schedule notifications.")));
-      return;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    final int oldNotificationCount = prefs.getInt('notification_count') ?? 0;
-
-    // Properly await the cancellation of old notifications
-    for (int i = 0; i < oldNotificationCount; i++) {
-      await NotificationService().cancelNotification(i);
-    }
-
-    // Properly await the scheduling of new notifications
-    for (int i = 0; i < _notificationCount; i++) {
-      String payload = '';
-      if (widget.activeGoal != null) {
-        final nextMilestone = widget.activeGoal!.milestones.firstWhere(
-            (m) => !m.isCompleted,
-            orElse: () => Milestone(
-                title: '', deadline: DateTime.now(), checkpoints: []));
-        if (nextMilestone.title.isNotEmpty) {
-          final nextCheckpoint = nextMilestone.checkpoints.firstWhere(
-              (c) => !nextMilestone.completedCheckpointIds.contains(c.id),
-              orElse: () => Checkpoint(title: ''));
-          if (nextCheckpoint.title.isNotEmpty) {
-            payload = json.encode({
-              'goalId': widget.activeGoal!.id,
-              'milestoneId': nextMilestone.id,
-              'checkpointId': nextCheckpoint.id,
-            });
-          }
-        }
-      }
-
-      await NotificationService().scheduleReminderNotification(
-        id: i,
-        title: 'Milestone Reminder',
-        body: 'How are you doing with your goals today?',
-        payload: payload,
-        hour: _notificationTimes[i].hour,
-        minute: _notificationTimes[i].minute,
-      );
-    }
-
-    await _saveSettings();
-
-    // THE CRITICAL FIX: Check if the widget is still in the tree BEFORE showing the SnackBar.
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Notification settings saved!")));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Notifications")),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (!_hasExactAlarmPermission)
-                  Card(
-                    color: Colors.red.shade100,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        children: [
-                          const Text("Permission Required",
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red)),
-                          const SizedBox(height: 8),
-                          const Text(
-                            "This app needs permission to schedule exact alarms for notifications to work correctly. Please grant this permission in your phone's settings.",
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          TextButton(
-                              onPressed: openAppSettings,
-                              child: const Text("Open Settings"))
-                        ],
-                      ),
-                    ),
-                  ),
-                Text("Number of daily reminders: $_notificationCount"),
-                Slider(
-                  value: _notificationCount.toDouble(),
-                  min: 0,
-                  max: 5,
-                  divisions: 5,
-                  label: _notificationCount.toString(),
-                  onChanged: (value) {
-                    setState(() {
-                      final newCount = value.toInt();
-                      while (_notificationTimes.length < newCount) {
-                        _notificationTimes
-                            .add(const TimeOfDay(hour: 9, minute: 0));
-                      }
-                      while (_notificationTimes.length > newCount) {
-                        _notificationTimes.removeLast();
-                      }
-                      _notificationCount = newCount;
-                    });
-                  },
-                ),
-                const Divider(),
-                for (int i = 0; i < _notificationCount; i++)
-                  ListTile(
-                    title: Text("Reminder ${i + 1}"),
-                    trailing: Text(_notificationTimes[i].format(context)),
-                    onTap: () async {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: _notificationTimes[i],
-                      );
-                      if (time != null) {
-                        setState(() {
-                          _notificationTimes[i] = time;
-                        });
-                      }
-                    },
-                  ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _updateAndSaveChanges,
-                  child: const Text("Save Settings"),
-                )
-              ],
-            ),
-    );
-  }
-}
-
-class HelpPage extends StatelessWidget {
-  const HelpPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("How to Use")),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [
-          HelpTile(
-            icon: Icons.track_changes_rounded,
-            title: "The Power of a Clear Goal",
-            content:
-                "Goals give you direction and focus. They turn your dreams into a destination. When you know where you're going, you can start planning the journey. Think of it as the difference between wandering aimlessly and following a map to a hidden treasure. Every step you take is a step closer to success.",
-          ),
-          HelpTile(
-            icon: Icons.rule_rounded,
-            title: "Set Goals the SMART Way",
-            content:
-                'To make your goals more powerful, make them SMART:\n\nSpecific: Instead of "get fit," try "run a 5k race."\nMeasurable: Track your progress. "Run 3 times a week."\nAchievable: Start with a goal you can realistically meet.\nRelevant: Does this goal matter to you right now?\nTime-bound: Set a deadline. "Run a 5k in 3 months."',
-          ),
-          HelpTile(
-            icon: Icons.splitscreen_rounded,
-            title: "Break It Down, Build It Up",
-            content:
-                "Big goals can feel overwhelming. The secret is to break them into smaller, manageable tasks. Want to write a book? Start with one chapter, then one page, then one paragraph. Our app lets you create milestones and tasks for your main goal. Ticking off these small wins will keep you motivated and build momentum.",
-          ),
-          HelpTile(
-            icon: Icons.show_chart_rounded,
-            title: "Track Your Progress, Stay Motivated",
-            content:
-                "Seeing how far you've come is a powerful motivator. Use our app's reporting features to log your efforts and celebrate your milestones. Whether it's a chart showing your progress or a simple checklist, visual feedback makes your hard work feel real and rewarding. Don't forget to look back at your journey and see your success!",
-          ),
-          HelpTile(
-            icon: Icons.alt_route_rounded,
-            title: "Stay Flexible, Adjust as You Go",
-            content:
-                "Life happens! It's okay if you need to adjust your plan. A goal isn't set in stone. It's a guide, not a rule. If you miss a day or find a better approach, use our app to update your milestones or timeline. The key is to stay engaged with your goal and keep moving forward, no matter the pace.",
-          ),
-          HelpTile(
-            icon: Icons.celebration_rounded,
-            title: "Celebrate Every Victory!",
-            content:
-                "Don't wait until the very end to celebrate. Every step forward is a victory. Did you complete a task? Did you stick to your schedule for a week? Acknowledge your effort! Use our app's features to mark your achievements. Celebrating small wins makes the journey enjoyable and fuels your motivation for the long run.",
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class HelpTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String content;
-  const HelpTile(
-      {super.key,
-      required this.icon,
-      required this.title,
-      required this.content});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(title,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(content),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+// --- FIX: Add back the GetInTouchPage widget ---
 class GetInTouchPage extends StatelessWidget {
   const GetInTouchPage({super.key});
 
@@ -946,7 +702,7 @@ class GetInTouchPage extends StatelessWidget {
                 title: const Text("Donate"),
                 subtitle: const Text("Support the development"),
                 onTap: () => _launchURL(
-                    "[https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing](https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing)"),
+                    "https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing"),
               ),
             ),
             Card(
@@ -955,7 +711,7 @@ class GetInTouchPage extends StatelessWidget {
                 title: const Text("Contribute"),
                 subtitle: const Text("Help improve the app on GitHub"),
                 onTap: () => _launchURL(
-                    "[https://github.com/MossesRoss/trackit/edit/main/main.dart](https://github.com/MossesRoss/trackit/edit/main/main.dart)"),
+                    "https://github.com/MossesRoss/trackit/edit/main/main.dart"),
               ),
             ),
           ],
@@ -965,171 +721,7 @@ class GetInTouchPage extends StatelessWidget {
   }
 }
 
-class TimerFocusPage extends StatefulWidget {
-  final Milestone milestone;
-  final Function(Duration) onSessionComplete;
-  const TimerFocusPage(
-      {super.key, required this.milestone, required this.onSessionComplete});
-
-  @override
-  State<TimerFocusPage> createState() => _TimerFocusPageState();
-}
-
-class _TimerFocusPageState extends State<TimerFocusPage> {
-  Timer? _timer;
-  int _seconds = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _startTimer();
-    NotificationService().showFocusNotification(widget.milestone.title);
-  }
-
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _seconds++;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    NotificationService().cancelFocusNotification();
-    super.dispose();
-  }
-
-  String _formatTime(int totalSeconds) {
-    final duration = Duration(seconds: totalSeconds);
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final hours = twoDigits(duration.inHours);
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return "$hours:$minutes:$seconds";
-  }
-
-  Future<bool> _showExitConfirmation() async {
-    _timer?.cancel();
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("End Focus Session?"),
-        content: Text(
-            "You've focused for ${_formatTime(_seconds)}. Do you want to add this time to your milestone?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text("Discard"),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text("Save & Exit"),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true) {
-      widget.onSessionComplete(Duration(seconds: _seconds));
-      if (mounted) Navigator.of(context).pop();
-      return false;
-    } else if (result == false) {
-      if (mounted) Navigator.of(context).pop();
-      return false;
-    } else {
-      _startTimer();
-      return false;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _showExitConfirmation,
-      child: Scaffold(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        body: GestureDetector(
-          onLongPress: () => _showExitConfirmation(),
-          child: Stack(
-            children: [
-              Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text("Focusing on:",
-                        style: TextStyle(
-                            fontSize: 20, color: Colors.grey.shade500)),
-                    const SizedBox(height: 8),
-                    Text(
-                      widget.milestone.title,
-                      style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 40),
-                    Text(_formatTime(_seconds),
-                        style: const TextStyle(
-                            fontSize: 72,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace')),
-                  ],
-                ),
-              ),
-              Positioned(
-                bottom: 40,
-                left: 20,
-                right: 20,
-                child: Text("Long-press or use back button to end session",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey.shade500)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class ProgressPieChart extends StatelessWidget {
-  final int completed;
-  final int total;
-  const ProgressPieChart(
-      {super.key, required this.completed, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final double percentage = total == 0 ? 0 : completed / total;
-    return PieChart(
-      PieChartData(
-        sections: [
-          PieChartSectionData(
-              color: Colors.green,
-              value: percentage * 100,
-              title: '${(percentage * 100).toStringAsFixed(0)}%',
-              radius: 50,
-              titleStyle: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
-          PieChartSectionData(
-            color: Colors.grey.shade300,
-            value: (1 - percentage) * 100,
-            title: '',
-            radius: 50,
-          ),
-        ],
-        centerSpaceRadius: 40,
-        sectionsSpace: 2,
-      ),
-    );
-  }
-}
-
+// --- GoalSetterCard (Unchanged) ---
 class GoalSetterCard extends StatefulWidget {
   final Function(String) onSetGoal;
   final bool isNewGoal;
@@ -1193,6 +785,7 @@ class _GoalSetterCardState extends State<GoalSetterCard> {
   }
 }
 
+// --- MilestoneNode (FIXED) ---
 class MilestoneNode extends StatelessWidget {
   final Milestone milestone;
   final bool isFirst;
@@ -1212,8 +805,9 @@ class MilestoneNode extends StatelessWidget {
 
   String _formatDuration(Duration duration) {
     if (duration.inMinutes == 0) return "${duration.inSeconds}s";
-    if (duration.inHours == 0)
+    if (duration.inHours == 0) {
       return "${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s";
+    }
     return "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
   }
 
@@ -1332,6 +926,7 @@ class MilestoneNode extends StatelessWidget {
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: milestone.isUnlocked ? null : Colors.grey)),
+                // --- FIX: This is the corrected subtitle ---
                 subtitle: Row(
                   children: [
                     Text(
@@ -1346,6 +941,7 @@ class MilestoneNode extends StatelessWidget {
                     ]
                   ],
                 ),
+                // --- End of corrected subtitle ---
                 trailing: milestone.isUnlocked ? null : const SizedBox.shrink(),
                 children: [
                   Padding(
@@ -1405,6 +1001,7 @@ class MilestoneNode extends StatelessWidget {
   }
 }
 
+// --- LinePainter (Unchanged) ---
 class LinePainter extends CustomPainter {
   final bool isFirst;
   final bool isLast;
@@ -1430,6 +1027,7 @@ class LinePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+// --- AddMilestoneForm (MODIFIED to use new SuggestionResult) ---
 class AddMilestoneForm extends StatefulWidget {
   final Function(Milestone) onAdd;
   final String goalTitle;
@@ -1471,16 +1069,33 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
       return;
     }
     setState(() => _isSuggestingTasks = true);
-    final suggestions = await SuggestionService.getTaskSuggestions(
+    final result = await SuggestionService.getTaskSuggestions(
         widget.goalTitle, _titleController.text.trim());
     if (mounted) {
       setState(() {
-        if (suggestions.isNotEmpty) {
-          _tasksController.text = suggestions.join('\n');
+        if (result.suggestion != null) {
+          try {
+            // Suggestion service returns a JSON string, decode it
+            final decoded = json.decode(result.suggestion!);
+            final suggestions = List<String>.from(decoded['tasks']);
+            if (suggestions.isNotEmpty) {
+              _tasksController.text = suggestions.join('\n');
+            }
+          } catch (e) {
+            debugPrint("Error decoding task suggestions: $e");
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Error: Could not understand AI response."),
+              backgroundColor: Colors.red,
+            ));
+          }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                "Could not get suggestions. Please check your connection or API key."),
+          String errorText =
+              "Could not get suggestions. Please check your connection.";
+          if (result.error == "NO_API_KEY") {
+            errorText = "Please set your Gemini API key in Settings first.";
+          }
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(errorText),
             backgroundColor: Colors.red,
           ));
         }
@@ -1592,6 +1207,259 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// --- FIX: Add back the missing classes that were accidentally deleted ---
+
+class MyJourneyPage extends StatelessWidget {
+  final List<Goal> allGoals;
+  const MyJourneyPage({super.key, required this.allGoals});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("My Journey")),
+      body: allGoals.isEmpty
+          ? const Center(child: Text("Your journey hasn't started yet!"))
+          : ListView.builder(
+              itemCount: allGoals.length,
+              itemBuilder: (context, index) {
+                final goal = allGoals[index];
+                Color color;
+                IconData icon;
+                final String statusText = goal.status.name[0].toUpperCase() +
+                    goal.status.name.substring(1);
+
+                switch (goal.status) {
+                  case GoalStatus.active:
+                    color = Colors.amber.shade700;
+                    icon = Icons.flag_rounded;
+                    break;
+                  case GoalStatus.achieved:
+                    color = Colors.green;
+                    icon = Icons.check_circle_rounded;
+                    break;
+                  case GoalStatus.givenUp:
+                    color = Colors.red;
+                    icon = Icons.cancel_rounded;
+                    break;
+                }
+                return Card(
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: ListTile(
+                    leading: Icon(icon, color: color),
+                    title: Text(goal.title,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(
+                        "Set on: ${DateFormat.yMMMd().format(goal.createdAt)}"),
+                    trailing: Text(statusText.toUpperCase(),
+                        style: TextStyle(
+                            color: color, fontWeight: FontWeight.bold)),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class NotificationsSettingsPage extends StatefulWidget {
+  final Goal? activeGoal;
+  const NotificationsSettingsPage({super.key, this.activeGoal});
+
+  @override
+  _NotificationsSettingsPageState createState() =>
+      _NotificationsSettingsPageState();
+}
+
+class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
+  int _notificationCount = 1;
+  List<TimeOfDay> _notificationTimes = [const TimeOfDay(hour: 9, minute: 0)];
+  bool _isLoading = true;
+  bool _hasExactAlarmPermission = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _checkPermissions();
+  }
+
+  Future<void> _checkPermissions() async {
+    var status = await Permission.scheduleExactAlarm.status;
+
+    // If permission is not granted, actively request it.
+    if (status.isDenied) {
+      // This will open the special "Alarms & reminders" settings screen for the user.
+      status = await Permission.scheduleExactAlarm.request();
+    }
+
+    if (mounted) {
+      setState(() {
+        _hasExactAlarmPermission = status.isGranted;
+      });
+    }
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _notificationCount = prefs.getInt('notification_count') ?? 1;
+      final timeStrings =
+          prefs.getStringList('notification_times') ?? ['09:00'];
+      _notificationTimes = timeStrings.map((t) {
+        final parts = t.split(':');
+        return TimeOfDay(
+            hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+      }).toList();
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('notification_count', _notificationCount);
+    final timeStrings =
+        _notificationTimes.map((t) => '${t.hour}:${t.minute}').toList();
+    await prefs.setStringList('notification_times', timeStrings);
+  }
+
+  void _updateAndSaveChanges() async {
+    if (!_hasExactAlarmPermission) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text("Permission denied. Cannot schedule notifications.")));
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final int oldNotificationCount = prefs.getInt('notification_count') ?? 0;
+
+    for (int i = 0; i < oldNotificationCount; i++) {
+      await NotificationService().cancelNotification(i);
+    }
+
+    for (int i = 0; i < _notificationCount; i++) {
+      String payload = '';
+      if (widget.activeGoal != null) {
+        final nextMilestone = widget.activeGoal!.milestones.firstWhere(
+            (m) => !m.isCompleted,
+            orElse: () => Milestone(
+                title: '', deadline: DateTime.now(), checkpoints: []));
+        if (nextMilestone.title.isNotEmpty) {
+          final nextCheckpoint = nextMilestone.checkpoints.firstWhere(
+              (c) => !nextMilestone.completedCheckpointIds.contains(c.id),
+              orElse: () => Checkpoint(title: ''));
+          if (nextCheckpoint.title.isNotEmpty) {
+            payload = json.encode({
+              'goalId': widget.activeGoal!.id,
+              'milestoneId': nextMilestone.id,
+              'checkpointId': nextCheckpoint.id,
+            });
+          }
+        }
+      }
+
+      await NotificationService().scheduleReminderNotification(
+        id: i,
+        title: 'Milestone Reminder',
+        body: 'How are you doing with your goals today?',
+        payload: payload,
+        hour: _notificationTimes[i].hour,
+        minute: _notificationTimes[i].minute,
+      );
+    }
+
+    await _saveSettings();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Notification settings saved!")));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Notifications")),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (!_hasExactAlarmPermission)
+                  Card(
+                    color: Colors.red.shade100,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        children: [
+                          const Text("Permission Required",
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red)),
+                          const SizedBox(height: 8),
+                          const Text(
+                            "This app needs permission to schedule exact alarms for notifications to work correctly. Please grant this permission in your phone's settings.",
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                              onPressed: openAppSettings,
+                              child: const Text("Open Settings"))
+                        ],
+                      ),
+                    ),
+                  ),
+                Text("Number of daily reminders: $_notificationCount"),
+                Slider(
+                  value: _notificationCount.toDouble(),
+                  min: 0,
+                  max: 5,
+                  divisions: 5,
+                  label: _notificationCount.toString(),
+                  onChanged: (value) {
+                    setState(() {
+                      final newCount = value.toInt();
+                      while (_notificationTimes.length < newCount) {
+                        _notificationTimes
+                            .add(const TimeOfDay(hour: 9, minute: 0));
+                      }
+                      while (_notificationTimes.length > newCount) {
+                        _notificationTimes.removeLast();
+                      }
+                      _notificationCount = newCount;
+                    });
+                  },
+                ),
+                const Divider(),
+                for (int i = 0; i < _notificationCount; i++)
+                  ListTile(
+                    title: Text("Reminder ${i + 1}"),
+                    trailing: Text(_notificationTimes[i].format(context)),
+                    onTap: () async {
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: _notificationTimes[i],
+                      );
+                      if (time != null) {
+                        setState(() {
+                          _notificationTimes[i] = time;
+                        });
+                      }
+                    },
+                  ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _updateAndSaveChanges,
+                  child: const Text("Save Settings"),
+                )
+              ],
+            ),
     );
   }
 }

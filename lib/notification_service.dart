@@ -181,16 +181,17 @@ class NotificationService {
   }
 
   // --- Method to show a persistent notification for the focus session ---
-  Future<void> showFocusNotification(String milestoneTitle) async {
+  Future<void> showFocusNotification(String milestoneTitle,
+      [String? payload]) async {
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
         AndroidNotificationDetails(
       'focus_channel_id',
       'Focus Mode',
       channelDescription: 'Notification shown while in a focus session.',
-      importance: Importance.low,
+      importance: Importance.low, // --- MODIFIED: Low importance so it's less intrusive
       priority: Priority.low,
-      ongoing: true,
-      autoCancel: false,
+      ongoing: true, // --- This makes it undismissable
+      autoCancel: false, // --- This prevents it from being cancelled on tap
     );
     const NotificationDetails platformChannelSpecifics =
         NotificationDetails(android: androidPlatformChannelSpecifics);
@@ -200,6 +201,7 @@ class NotificationService {
       'Focusing on: $milestoneTitle',
       'Your session is in progress...',
       platformChannelSpecifics,
+      payload: payload, // --- NEW: Add payload to handle tap
     );
   }
 

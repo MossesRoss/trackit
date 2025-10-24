@@ -1,9 +1,10 @@
 import 'dart:convert';
+import 'dart:math'; // For random quote index
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show ChangeNotifier;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+// import 'package:flutter_dotenv/flutter_dotenv.dart'; // No longer needed
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -37,26 +38,29 @@ class AuthService with ChangeNotifier {
 
   Future<void> signUpWithEmail(String email, String password) async {
     try {
-      await _auth.createUserWithEmailAndPassword(email: email, password: password);
+      await _auth.createUserWithEmailAndPassword(
+          email: email, password: password);
     } on FirebaseAuthException catch (e) {
       throw e.message ?? 'An unknown error occurred.';
     }
   }
-  
+
   Future<void> signInWithGoogle() async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         return; // User cancelled the sign-in
       }
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
       final AuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
       await _auth.signInWithCredential(credential);
     } on FirebaseAuthException catch (e) {
-      throw e.message ?? 'An unknown error occurred while signing in with Google.';
+      throw e.message ??
+          'An unknown error occurred while signing in with Google.';
     }
   }
 
@@ -66,7 +70,7 @@ class AuthService with ChangeNotifier {
   }
 }
 
-// --- Firestore Service ---
+// --- Firestore Service (unchanged) ---
 class FirestoreService {
   final String? uid;
   FirestoreService(this.uid);
@@ -84,10 +88,10 @@ class FirestoreService {
   Future<void> saveGoals(List<Goal> allGoals) async {
     if (uid == null) return;
     final userDoc = _db.collection('users').doc(uid);
-    
+
     final user = FirebaseAuth.instance.currentUser;
     if (user?.email != null) {
-        await userDoc.set({'email': user!.email}, SetOptions(merge: true));
+      await userDoc.set({'email': user!.email}, SetOptions(merge: true));
     }
 
     final goalsCollection = userDoc.collection('goals');
@@ -113,16 +117,18 @@ class FirestoreService {
     if (uid == null) return [];
     final goalsCollection = _db.collection('users').doc(uid).collection('goals');
     final snapshot = await goalsCollection.get();
-    final goals = snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
+    final goals =
+        snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
 
     final String goalsJson = json.encode(goals.map((g) => g.toJson()).toList());
     await prefs.setString(_localCacheKey, goalsJson);
     return goals;
   }
 
-  Future<Map<String, dynamic>> _getPeriodData(DateTime start, DateTime end, {bool isYearly = false}) async {
+  Future<Map<String, dynamic>> _getPeriodData(DateTime start, DateTime end,
+      {bool isYearly = false}) async {
     final allGoals = await loadGoals();
-    
+
     Duration totalTime = Duration.zero;
     int tasksCompleted = 0;
     Map<TaskCheckinStatus, int> checkinCounts = {
@@ -139,14 +145,16 @@ class FirestoreService {
         tasksCompleted += milestone.completedCheckpointIds.length;
 
         for (final checkin in milestone.checkins) {
-          if (checkin.timestamp.isAfter(start) && checkin.timestamp.isBefore(end)) {
-            checkinCounts[checkin.status] = (checkinCounts[checkin.status] ?? 0) + 1;
+          if (checkin.timestamp.isAfter(start) &&
+              checkin.timestamp.isBefore(end)) {
+            checkinCounts[checkin.status] =
+                (checkinCounts[checkin.status] ?? 0) + 1;
           }
         }
       }
     }
     return {
-      'timeSpent': totalTime, 
+      'timeSpent': totalTime,
       'tasksCompleted': tasksCompleted,
       'checkinCounts': checkinCounts
     };
@@ -157,7 +165,7 @@ class FirestoreService {
     final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
     final endOfWeek = startOfWeek.add(const Duration(days: 6));
     final startOfLastWeek = startOfWeek.subtract(const Duration(days: 7));
-    
+
     final currentData = await _getPeriodData(startOfWeek, endOfWeek);
     final previousData = await _getPeriodData(startOfLastWeek, startOfWeek);
 
@@ -169,13 +177,18 @@ class FirestoreService {
     final startOfMonth = DateTime(now.year, now.month, 1);
     final endOfMonth = DateTime(now.year, now.month + 1, 0);
     final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
-    
+
     final currentData = await _getPeriodData(startOfMonth, endOfMonth);
     final previousData = await _getPeriodData(startOfLastMonth, startOfMonth);
 
-    final summary = await SuggestionService.getMonthlyReportSummary(currentData, previousData);
+    final summary = await SuggestionService.getMonthlyReportSummary(
+        currentData, previousData);
 
-    return {'currentPeriod': currentData, 'previousPeriod': previousData, 'summary': summary};
+    return {
+      'currentPeriod': currentData,
+      'previousPeriod': previousData,
+      'summary': summary
+    };
   }
 
   Future<Map<String, dynamic>> getYearlyReport() async {
@@ -184,34 +197,50 @@ class FirestoreService {
     final endOfYear = DateTime(now.year, 12, 31);
     final startOfLastYear = DateTime(now.year - 1, 1, 1);
 
-    final currentData = await _getPeriodData(startOfYear, endOfYear, isYearly: true);
+    final currentData =
+        await _getPeriodData(startOfYear, endOfYear, isYearly: true);
     final previousData = await _getPeriodData(startOfLastYear, startOfYear);
 
-    final querySnapshot = await _db.collection('archived_goals')
-      .where('userId', isEqualTo: uid)
-      .where('createdAt', isGreaterThanOrEqualTo: startOfYear.toIso8601String())
-      .where('createdAt', isLessThanOrEqualTo: endOfYear.toIso8601String())
-      .get();
-    
-    final archivedGoals = querySnapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
-    
+    final querySnapshot = await _db
+        .collection('archived_goals')
+        .where('userId', isEqualTo: uid)
+        .where('createdAt',
+            isGreaterThanOrEqualTo: startOfYear.toIso8601String())
+        .where('createdAt', isLessThanOrEqualTo: endOfYear.toIso8601String())
+        .get();
+
+    final archivedGoals =
+        querySnapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
+
     return {
-      'currentPeriod': currentData, 
+      'currentPeriod': currentData,
       'previousPeriod': previousData,
       'archivedGoals': archivedGoals
     };
   }
 }
 
-class SuggestionService {
-  static final String? _apiKey = dotenv.env['GEMINI_API_KEY'];
+// --- NEW: Helper class for Suggestion Service results ---
+class SuggestionResult {
+  final String? suggestion;
+  final String? error; // e.g., "NO_API_KEY", "API_ERROR", "NETWORK_ERROR"
 
-  static Future<String> _callGemini(String prompt) async {
-    if (_apiKey == null || _apiKey!.isEmpty) {
-      return "API Key is missing. Please add it to your .env file.";
+  SuggestionResult({this.suggestion, this.error});
+}
+
+class SuggestionService {
+  // --- MODIFIED: Read API key from SharedPreferences, not .env ---
+  static Future<SuggestionResult> _callGemini(String prompt) async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? _apiKey = prefs.getString('gemini_api_key');
+
+    if (_apiKey == null || _apiKey.isEmpty) {
+      debugPrint("Gemini API Error: Key is missing.");
+      return SuggestionResult(error: "NO_API_KEY");
     }
 
-    const model = 'gemini-1.5-flash-latest';
+    // --- FIX: Correct model name ---
+    const model = 'gemini-pro';
     final url = Uri.parse(
         'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$_apiKey');
 
@@ -220,43 +249,52 @@ class SuggestionService {
         url,
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'contents': [{'role': 'user', 'parts': [{'text': prompt}]}]
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': prompt}
+              ]
+            }
+          ]
         }),
       );
 
-      if (response.statusCode == 503) {
-        return "The AI service is temporarily unavailable. Please try again later.";
-      }
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['candidates'][0]['content']['parts'][0]['text'].trim();
+        final text = data['candidates'][0]['content']['parts'][0]['text'].trim();
+        return SuggestionResult(suggestion: text);
       } else {
         final errorBody = json.decode(response.body);
-        final errorMessage = errorBody['error']?['message'] ?? 'Unknown API error.';
+        final errorMessage =
+            errorBody['error']?['message'] ?? 'Unknown API error.';
         debugPrint("Gemini API Error: ${response.body}");
-        return "Error ${response.statusCode}: $errorMessage";
+        return SuggestionResult(error: "API_ERROR: $errorMessage");
       }
     } catch (e) {
       debugPrint("Gemini connection Error: $e");
-      return "Error: Failed to connect. Check network or API key.";
+      return SuggestionResult(error: "NETWORK_ERROR");
     }
   }
 
-  static Future<String> getSuggestion(Goal? activeGoal, Milestone? nextMilestone) async {
+  static Future<SuggestionResult> getSuggestion(
+      Goal? activeGoal, Milestone? nextMilestone) async {
     if (activeGoal == null || nextMilestone == null) {
-      return "All tasks complete! Great job on finishing your milestones.";
+      return SuggestionResult(
+          suggestion: "All tasks complete! Great job on finishing your milestones.");
     }
-    
+
     final nextCheckpoint = nextMilestone.checkpoints.firstWhere(
       (c) => !nextMilestone.completedCheckpointIds.contains(c.id),
       orElse: () => Checkpoint(title: "No more tasks in this milestone"),
     );
 
     if (nextCheckpoint.title == "No more tasks in this milestone") {
-      return "Milestone '${nextMilestone.title}' is complete! Well done!";
+      return SuggestionResult(
+          suggestion: "Milestone '${nextMilestone.title}' is complete! Well done!");
     }
 
+    // Schedule notification (this can happen in parallel)
     final payload = {
       'goalId': activeGoal.id,
       'milestoneId': nextMilestone.id,
@@ -270,11 +308,12 @@ class SuggestionService {
 
     final prompt =
         "My current milestone is '${nextMilestone.title}' due on ${DateFormat.yMMMd().format(nextMilestone.deadline)}. My next task is: ${nextCheckpoint.title}. What is a single, concise, and actionable tip to help me with this specific task? Keep it short and motivating.";
-    
+
     return _callGemini(prompt);
   }
 
-  static Future<List<String>> getTaskSuggestions(String goalTitle, String milestoneTitle) async {
+  static Future<SuggestionResult> getTaskSuggestions(
+      String goalTitle, String milestoneTitle) async {
     final prompt = """
     A user is planning their goal.
     Main Goal: "$goalTitle"
@@ -292,18 +331,25 @@ class SuggestionService {
     }
     """;
     try {
-      final response = await _callGemini(prompt);
-      final cleanedResponse = response.replaceAll('```json', '').replaceAll('```', '').trim();
-      final decoded = json.decode(cleanedResponse);
-      return List<String>.from(decoded['tasks']);
+      final result = await _callGemini(prompt);
+      if (result.suggestion != null) {
+        final cleanedResponse =
+            result.suggestion!.replaceAll('```json', '').replaceAll('```', '').trim();
+        // Return suggestion as JSON string for the UI to decode
+        return SuggestionResult(suggestion: cleanedResponse);
+      } else {
+        return result; // Pass the error up
+      }
     } catch (e) {
       debugPrint("Error decoding task suggestions: $e");
-      return [];
+      return SuggestionResult(error: "DECODING_ERROR");
     }
   }
 
-  static Future<String> getMonthlyReportSummary(Map<String, dynamic> currentData, Map<String, dynamic> previousData) async {
-      final prompt = """
+  static Future<String> getMonthlyReportSummary(
+      Map<String, dynamic> currentData,
+      Map<String, dynamic> previousData) async {
+    final prompt = """
       Generate a concise, encouraging monthly performance report for a user of a goal-setting app.
       Focus on positive reinforcement, even for small improvements. If the user didn't make any progress
       Tell him the conciquences if he continues to do this.
@@ -318,6 +364,36 @@ class SuggestionService {
       Example Output:
       "Great work this month! You dedicated a solid amount of time to your goals and made tangible progress. You've shown fantastic consistency. Keep that momentum going into next month!"
       """;
-      return _callGemini(prompt);
+    final result = await _callGemini(prompt);
+    return result.suggestion ??
+        "Could not generate summary at this time."; // Return a simple fallback
+  }
+}
+
+// --- NEW: Quote Service for Fallback Content ---
+class QuoteService {
+  static const String _quoteIndexKey = 'last_quote_index';
+  static const List<String> _quotes = [
+    "The secret of getting ahead is getting started. – Mark Twain",
+    "It does not matter how slowly you go as long as you do not stop. – Confucius",
+    "Your time is limited, so don't waste it living someone else's life. – Steve Jobs",
+    "The only way to do great work is to love what you do. – Steve Jobs",
+    "The future belongs to those who believe in the beauty of their dreams. – Eleanor Roosevelt",
+    "Success is not final; failure is not fatal: It is the courage to continue that counts. – Winston Churchill",
+    "Believe you can and you're halfway there. – Theodore Roosevelt",
+    "The best way to predict the future is to create it. – Peter Drucker",
+    "A year from now you may wish you had started today. – Karen Lamb",
+    "The journey of a thousand miles begins with a single step. – Laozi"
+  ];
+
+  static Future<String> getQuote() async {
+    final prefs = await SharedPreferences.getInstance();
+    int lastIndex = prefs.getInt(_quoteIndexKey) ?? -1;
+
+    // Increment index and loop back to 0 if at the end
+    int nextIndex = (lastIndex + 1) % _quotes.length;
+
+    await prefs.setInt(_quoteIndexKey, nextIndex);
+    return _quotes[nextIndex];
   }
 }
