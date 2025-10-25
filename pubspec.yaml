@@ -25,6 +25,7 @@ dependencies:
   timezone: ^0.9.4
   # NEW: Add this for notification streams
   rxdart: ^0.27.7
+  timeline_tile: ^2.0.0
 
   # --- PRODUCTION-READY DEPENDENCIES ---
   # Firebase
@@ -36,8 +37,7 @@ dependencies:
   # State Management
   provider: ^6.0.5
 
-  # Secure API Key Management
-  flutter_dotenv: ^5.1.0
+  # Secure API Key Managementf
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +55,5 @@ flutter:
   uses-material-design: true
   
   assets:
-    - .env
     - assets/
     - assets/icon/

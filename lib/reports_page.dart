@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import './models.dart';
 import './services.dart';
 
-// --- NEW: Moved ProgressPieChart from ui.dart ---
+// Fully responsive now
 class ProgressPieChart extends StatelessWidget {
   final int completed;
   final int total;
@@ -16,39 +16,54 @@ class ProgressPieChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double percentage = total == 0 ? 0 : completed / total;
-    // --- MODIFIED: Added standard framework (border) ---
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Theme.of(context).dividerColor,
-          width: 2,
+
+    // Use LayoutBuilder to get parent constraints
+    return LayoutBuilder(builder: (context, constraints) {
+      // Calculate sizes based on the smallest dimension of the parent
+      final double chartSize = constraints.maxWidth < constraints.maxHeight
+          ? constraints.maxWidth
+          : constraints.maxHeight;
+
+      // Calculate dynamic radius and font size
+      final double radius = chartSize * 0.35; // 35% of the available size
+      final double centerSpaceRadius = chartSize * 0.25; // 25%
+      final double titleFontSize = chartSize * 0.1; // 10%
+
+      return Container(
+        width: chartSize,
+        height: chartSize,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Theme.of(context).dividerColor,
+            width: 2,
+          ),
         ),
-      ),
-      child: PieChart(
-        PieChartData(
-          sections: [
-            PieChartSectionData(
-                color: Colors.green.shade400,
-                value: percentage * 100,
-                title: '${(percentage * 100).toStringAsFixed(0)}%',
-                radius: 50,
-                titleStyle: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-            PieChartSectionData(
-              color: Colors.grey.shade200,
-              value: (1 - percentage) * 100,
-              title: '',
-              radius: 50,
-            ),
-          ],
-          centerSpaceRadius: 40,
-          sectionsSpace: 2,
+        child: PieChart(
+          PieChartData(
+            sections: [
+              PieChartSectionData(
+                  color: Colors.green.shade400,
+                  value: percentage * 100,
+                  title: '${(percentage * 100).toStringAsFixed(0)}%',
+                  radius: radius,
+                  titleStyle: TextStyle(
+                      fontSize: titleFontSize,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white)),
+              PieChartSectionData(
+                color: Colors.grey.shade200,
+                value: (1 - percentage) * 100,
+                title: '',
+                radius: radius,
+              ),
+            ],
+            centerSpaceRadius: centerSpaceRadius,
+            sectionsSpace: 2,
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 
@@ -152,7 +167,8 @@ class ReportView extends StatelessWidget {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text('No data available for this period.'));
+          return const Center(
+              child: Text('No data available for this period.'));
         }
 
         final reportData = snapshot.data!;
@@ -179,12 +195,15 @@ class ReportView extends StatelessWidget {
                 "Overall Goal Progress",
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 200,
-                child: ProgressPieChart(
-                  completed: activeGoal!.completedTasks,
-                  total: activeGoal!.totalTasks,
+              AspectRatio(
+                aspectRatio: 1.5,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 48.0, vertical: 16.0),
+                  child: ProgressPieChart(
+                    completed: activeGoal!.completedTasks,
+                    total: activeGoal!.totalTasks,
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
@@ -203,7 +222,8 @@ class ReportView extends StatelessWidget {
                   padding: const EdgeInsets.all(16.0),
                   child: Text(
                     summary,
-                    style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
+                    style: const TextStyle(
+                        fontSize: 16, fontStyle: FontStyle.italic),
                   ),
                 ),
               ),
@@ -230,7 +250,9 @@ class ReportView extends StatelessWidget {
             const SizedBox(height: 8),
             CheckinSummaryCard(checkinCounts: checkinCounts),
 
-            if (isYearly && archivedGoals != null && archivedGoals.isNotEmpty) ...[
+            if (isYearly &&
+                archivedGoals != null &&
+                archivedGoals.isNotEmpty) ...[
               const SizedBox(height: 24),
               const Text(
                 "Archived Goals This Year",
@@ -320,7 +342,8 @@ class CheckinRow extends StatelessWidget {
           Text(details[status]['text'], style: const TextStyle(fontSize: 16)),
           const Spacer(),
           Text(count.toString(),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -342,8 +365,8 @@ class ArchivedGoalCard extends StatelessWidget {
           isAchieved ? Icons.emoji_events_rounded : Icons.flag_rounded,
           color: isAchieved ? Colors.green.shade700 : Colors.red.shade700,
         ),
-        title:
-            Text(goal.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(goal.title,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(isAchieved ? 'Achieved!' : 'Given Up'),
       ),
     );
