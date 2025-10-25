@@ -1,7 +1,19 @@
+/*
+ * @author Mosses
+ * @version 1.2.0
+ * --- CHANGELOG ---
+ * v1.2.0: Added "Upgrade to Pro" button and dialog in SettingsPage
+ * as requested. Dialog links to the UPI payment URL.
+ * v1.1.0: Implemented robust timer recovery using SharedPreferences.
+ * Timer now saves progress every 5 seconds to `kRecoveryTimeKey`.
+ * Removed all UI related to setting/viewing the Gemini API key.
+ * Updated error message to point to `services.dart` URL.
+ */
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-// import 'package:fl_chart/fl_chart.dart'; // MOSSES FIX: No longer needed here
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -10,8 +22,12 @@ import 'package:url_launcher/url_launcher.dart';
 import './models.dart';
 import './services.dart';
 import './reports_page.dart';
-import './notification_service.dart'; // Import the new service
-import './guide_page.dart'; // --- NEW: Import the new guide page ---
+import './notification_service.dart';
+import './guide_page.dart';
+
+// --- Keys for SharedPreferences Timer Recovery ---
+const String kRecoveryTimeKey = 'recovery_time_seconds';
+const String kRecoveryMilestoneKey = 'recovery_milestone_id';
 
 class HomePage extends StatefulWidget {
   final Goal? activeGoal;
@@ -32,7 +48,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _suggestion = "";
-  bool _isLoading = true; // --- MODIFIED: Start as true ---
+  bool _isLoading = true;
 
   Milestone? get _nextMilestone {
     if (widget.activeGoal == null) return null;
@@ -57,7 +73,7 @@ class _HomePageState extends State<HomePage> {
     final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String? currentMilestoneId = _nextMilestone?.id;
 
-    // --- NEW: Check cache first ---
+    // Check cache first
     final String? cachedDate = prefs.getString('suggestion_cache_date');
     final String? cachedMilestoneId =
         prefs.getString('suggestion_cache_milestone_id');
@@ -76,7 +92,7 @@ class _HomePageState extends State<HomePage> {
       return; // Use cached data
     }
 
-    // --- No valid cache, fetch new suggestion ---
+    // No valid cache, fetch new suggestion
     final result = await SuggestionService.getSuggestion(
         widget.activeGoal, _nextMilestone);
 
@@ -90,10 +106,12 @@ class _HomePageState extends State<HomePage> {
             'suggestion_cache_milestone_id', currentMilestoneId ?? '');
         await prefs.setString('suggestion_cache_content', textToShow);
       } else {
-        // --- NEW: Handle errors and get fallback ---
+        // Handle errors and get fallback
         if (result.error == "NO_API_KEY") {
+          // Updated error message to be more helpful
           textToShow =
-              "Please set your Gemini API key in Settings to get AI suggestions.";
+              "AI features are offline. (Dev: Check _appsScriptUrl in services.dart)";
+          debugPrint("CRITICAL: _appsScriptUrl is not set in services.dart");
         } else {
           // API error or network error, get a quote
           textToShow = await QuoteService.getQuote();
@@ -110,7 +128,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // --- MODIFIED: AppBar title is now back to the goal title ---
       appBar: AppBar(
         title: Text(widget.activeGoal?.title ?? 'Track It'),
         actions: [
@@ -127,11 +144,9 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(16.0),
           child: widget.activeGoal == null
               ? GoalSetterCard(onSetGoal: widget.onSetGoal)
-              // --- MODIFIED: New UI for active goal ---
               : Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // --- REMOVED: Goal title Text widget removed from body ---
                     const SizedBox(height: 40),
                     if (_nextMilestone != null)
                       GoalTimerCircle(
@@ -170,7 +185,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// --- NEW: Widget for the animated timer circle ---
+// --- Widget for the animated timer circle ---
 class GoalTimerCircle extends StatefulWidget {
   final Goal goal;
   final Milestone nextMilestone;
@@ -221,16 +236,21 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     super.dispose();
   }
 
-  void _startTimer() {
+  void _startTimer() async {
     setState(() {
       _isTimerRunning = true;
       _showTimer = true; // Fade to timer
     });
     _animationController.value = 1.5;
 
+    // Clear any old recovery keys before starting a new session
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kRecoveryTimeKey);
+    await prefs.remove(kRecoveryMilestoneKey);
+    debugPrint("Timer started. Cleared old recovery keys.");
+
     NotificationService().showFocusNotification(
       widget.nextMilestone.title,
-      // Payload to reopen the app
       json.encode({'action': 'OPEN_HOME'}),
     );
 
@@ -238,12 +258,31 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
       setState(() {
         _secondsElapsed++;
       });
+
+      // --- Robust Timer Save (Your Idea) ---
+      // Every 5 seconds, save the current time to SharedPreferences
+      if (_secondsElapsed % 5 == 0) {
+        // We use .then() (fire-and-forget) so we don't 'await'
+        // inside a periodic timer, which is bad practice.
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setInt(kRecoveryTimeKey, _secondsElapsed);
+          prefs.setString(kRecoveryMilestoneKey, widget.nextMilestone.id);
+        });
+        debugPrint("Timer recovery data saved: $_secondsElapsed seconds");
+      }
     });
   }
 
-  void _stopTimer() {
+  void _stopTimer() async {
     _timer?.cancel();
     NotificationService().cancelFocusNotification();
+
+    // Clear the recovery keys FIRST.
+    // This prevents a double-count if the app is closed right after stopping.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kRecoveryTimeKey);
+    await prefs.remove(kRecoveryMilestoneKey);
+    debugPrint("Timer stopped. Cleared recovery keys.");
 
     if (_secondsElapsed > 0) {
       widget.onTimeAdd(
@@ -266,9 +305,7 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     }
   }
 
-  // --- Tap handler ---
   void _onTap() {
-    // --- MODIFIED: Only show a hint, do not stop timer ---
     if (_isTimerRunning) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text("Hold the circle to stop the session."),
@@ -442,8 +479,7 @@ class MilestonesPageState extends State<MilestonesPage> {
   }
 }
 
-// --- MOSSES FIX: This widget is UNCHANGED from your version ---
-// I am keeping the API Key settings as requested.
+// --- SettingsPage (Upgrade Button Added) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -459,45 +495,7 @@ class SettingsPage extends StatelessWidget {
       required this.onEditModeChanged,
       required this.allGoals});
 
-  // --- Dialog to set API Key ---
-  void _showApiKeyDialog(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
-    final _apiKeyController =
-        TextEditingController(text: prefs.getString('gemini_api_key'));
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Set Gemini API Key"),
-          content: TextField(
-            controller: _apiKeyController,
-            decoration: const InputDecoration(labelText: "API Key"),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                await prefs.setString(
-                    'gemini_api_key', _apiKeyController.text.trim());
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("API Key saved!")));
-                }
-              },
-              child: const Text("Save"),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // --- _launchURL method ---
+  // --- _launchURL method (unchanged) ---
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url)) {
@@ -505,11 +503,89 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
+  // --- NEW: Show Upgrade Dialog ---
+  void _showUpgradeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.0),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded),
+              SizedBox(width: 8),
+              Text("Upgrade to Pro"),
+            ],
+          ),
+          content: const SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Unlock your full potential and achieve your goals 81% more effectively!",
+                  style: TextStyle(fontSize: 16),
+                ),
+                SizedBox(height: 24),
+                _BenefitTile(
+                  icon: Icons.palette_rounded,
+                  title: "Full App Customization",
+                  subtitle:
+                      "Request any feature or layout change, just for you.",
+                ),
+                _BenefitTile(
+                  icon: Icons.auto_awesome_rounded,
+                  title: "Powerful AI Features",
+                  subtitle:
+                      "Get AI-powered suggestions, planning, and insights everywhere.",
+                ),
+                _BenefitTile(
+                  icon: Icons.bar_chart_rounded,
+                  title: "Advanced Data Visualization",
+                  subtitle:
+                      "See beautiful charts of your progress, habits, and projections.",
+                ),
+                _BenefitTile(
+                  icon: Icons.schedule_rounded,
+                  title: "AI-Powered Goal Scheduling",
+                  subtitle:
+                      "Let AI analyze your goals and build the perfect milestone plan.",
+                ),
+                _BenefitTile(
+                  icon: Icons.support_agent_rounded,
+                  title: "Priority Support",
+                  subtitle: "Get your questions and requests handled first.",
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Maybe Later"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Redirect to the same UPI screenshot
+                _launchURL(
+                    "https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing");
+                Navigator.of(context).pop();
+              },
+              child: const Text("Upgrade Now"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context, listen: false);
 
-    // --- Find the active goal to pass to ReportsPage ---
+    // Find the active goal to pass to ReportsPage
     Goal? activeGoal;
     try {
       activeGoal = allGoals.firstWhere((g) => g.status == GoalStatus.active);
@@ -521,6 +597,32 @@ class SettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          // --- NEW: Upgrade to Pro Tile ---
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: ListTile(
+              leading: Icon(
+                Icons.auto_awesome_rounded,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+              title: Text(
+                "Upgrade to Pro",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+              subtitle: Text(
+                "Unlock AI features & more!",
+                style: TextStyle(
+                  color:
+                      Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.8),
+                ),
+              ),
+              onTap: () => _showUpgradeDialog(context),
+            ),
+          ),
           SwitchListTile(
             title: const Text('Dark Mode'),
             value: isDarkMode,
@@ -534,20 +636,13 @@ class SettingsPage extends StatelessWidget {
             onChanged: onEditModeChanged,
             secondary: const Icon(Icons.edit_rounded),
           ),
-          // --- API Key Tile ---
-          ListTile(
-            leading: const Icon(Icons.api_rounded),
-            title: const Text("Gemini API Key"),
-            subtitle: const Text("Set your personal API key for AI features"),
-            onTap: () => _showApiKeyDialog(context),
-          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.assessment_rounded),
             title: const Text("Reports"),
             subtitle: const Text("View your weekly and monthly progress"),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                // --- MODIFIED: Pass the activeGoal to ReportsPage ---
+                // Pass the activeGoal to ReportsPage
                 builder: (_) => ReportsPage(activeGoal: activeGoal))),
           ),
           ListTile(
@@ -565,65 +660,11 @@ class SettingsPage extends StatelessWidget {
                     builder: (_) =>
                         NotificationsSettingsPage(activeGoal: activeGoal)));
               }),
-          // --- MODIFIED: "Help" is now "Guide" ---
           ListTile(
             leading: const Icon(Icons.help_outline_rounded),
             title: const Text("How to Use (Guide)"),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const GuidePage())),
-          ),
-          // --- NEW: Technical Help section ---
-          ExpansionTile(
-            leading: const Icon(Icons.vpn_key_rounded),
-            title: const Text("Technical Help"),
-            subtitle: const Text("How to get your API key"),
-            children: [
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0)
-                        .copyWith(left: 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "To use the AI suggestion features, you need a free Gemini API key from Google's AI Studio.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      "1. Go to aistudio.google.com on a computer.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const Text(
-                      "2. Sign in with your Google account.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const Text(
-                      "3. Click 'Get API key' on the left menu.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const Text(
-                      "4. Click 'Create API key in new project'.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const Text(
-                      "5. Copy the long string of letters and numbers.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const Text(
-                      "6. Come back here and paste it in the 'Gemini API Key' setting above.",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => _launchURL(
-                          "[https://aistudio.google.com/](https://aistudio.google.com/)"),
-                      child: const Text("Open Google AI Studio"),
-                    )
-                  ],
-                ),
-              )
-            ],
           ),
           ListTile(
             leading: const Icon(Icons.connect_without_contact_rounded),
@@ -645,7 +686,27 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// --- FIX: Add back the GetInTouchPage widget ---
+// --- NEW: Helper widget for the Upgrade Dialog ---
+class _BenefitTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _BenefitTile(
+      {required this.icon, required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Text(subtitle),
+    );
+  }
+}
+
+// --- GetInTouchPage (Unchanged) ---
 class GetInTouchPage extends StatelessWidget {
   const GetInTouchPage({super.key});
 
@@ -679,7 +740,7 @@ class GetInTouchPage extends StatelessWidget {
                 title: const Text("Donate"),
                 subtitle: const Text("Support the development"),
                 onTap: () => _launchURL(
-                    "[https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing](https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing)"),
+                    "https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing"),
               ),
             ),
             Card(
@@ -688,7 +749,7 @@ class GetInTouchPage extends StatelessWidget {
                 title: const Text("Contribute"),
                 subtitle: const Text("Help improve the app on GitHub"),
                 onTap: () => _launchURL(
-                    "[https://github.com/MossesRoss/trackit/edit/main/main.dart](https://github.com/MossesRoss/trackit/edit/main/main.dart)"),
+                    "https://github.com/MossesRoss/trackit/edit/main/main.dart"),
               ),
             ),
           ],
@@ -762,7 +823,7 @@ class _GoalSetterCardState extends State<GoalSetterCard> {
   }
 }
 
-// --- MilestoneNode (FIXED) ---
+// --- MilestoneNode (Unchanged) ---
 class MilestoneNode extends StatelessWidget {
   final Milestone milestone;
   final bool isFirst;
@@ -903,7 +964,6 @@ class MilestoneNode extends StatelessWidget {
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: milestone.isUnlocked ? null : Colors.grey)),
-                // --- FIX: This is the corrected subtitle ---
                 subtitle: Row(
                   children: [
                     Text(
@@ -918,7 +978,6 @@ class MilestoneNode extends StatelessWidget {
                     ]
                   ],
                 ),
-                // --- End of corrected subtitle ---
                 trailing: milestone.isUnlocked ? null : const SizedBox.shrink(),
                 children: [
                   Padding(
@@ -1004,9 +1063,7 @@ class LinePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// --- MOSSES FIX: This widget is UNCHANGED from your version ---
-// The JSON parsing logic here is now correct because the new _callGemini
-// function provides a clean, reliable JSON string.
+// --- AddMilestoneForm (Unchanged) ---
 class AddMilestoneForm extends StatefulWidget {
   final Function(Milestone) onAdd;
   final String goalTitle;
@@ -1071,7 +1128,8 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
           String errorText =
               "Could not get suggestions. Please check your connection.";
           if (result.error == "NO_API_KEY") {
-            errorText = "Please set your Gemini API key in Settings first.";
+            errorText =
+                "AI features are offline. (Dev: Check Apps Script URL)";
           }
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(errorText),
@@ -1190,8 +1248,7 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
   }
 }
 
-// --- FIX: Add back the missing classes that were accidentally deleted ---
-
+// --- MyJourneyPage (Unchanged) ---
 class MyJourneyPage extends StatelessWidget {
   final List<Goal> allGoals;
   const MyJourneyPage({super.key, required this.allGoals});
@@ -1245,6 +1302,7 @@ class MyJourneyPage extends StatelessWidget {
   }
 }
 
+// --- NotificationsSettingsPage (Unchanged) ---
 class NotificationsSettingsPage extends StatefulWidget {
   final Goal? activeGoal;
   const NotificationsSettingsPage({super.key, this.activeGoal});

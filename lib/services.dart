@@ -1,12 +1,21 @@
+/*
+ * @author Mosses
+ * @version 1.1.0
+ * --- CHANGELOG ---
+ * v1.1.0: Removed direct Gemini API calls.
+ * Pivoted to using a Google Apps Script proxy for all AI features.
+ * Removed _callGemini, added _callAppsScript.
+ * Ensures API key is 100% server-side and free.
+ */
+
 import 'dart:convert';
 import 'dart:math'; // For random quote index
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show ChangeNotifier, debugPrint;
-// import 'package:flutter_dotenv/flutter_dotenv.dart'; // MOSSES FIX: No longer needed
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:http/http.dart' as http;
+import 'package:http/http.dart' as http; // Kept for Apps Script calls
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import './models.dart';
@@ -220,7 +229,7 @@ class FirestoreService {
   }
 }
 
-// --- NEW: Helper class for Suggestion Service results ---
+// --- Helper class for Suggestion Service results ---
 class SuggestionResult {
   final String? suggestion;
   final String? error; // e.g., "NO_API_KEY", "API_ERROR", "NETWORK_ERROR"
@@ -228,103 +237,62 @@ class SuggestionResult {
   SuggestionResult({this.suggestion, this.error});
 }
 
-// MOSSES FIX: This entire service has been updated
+// --- Suggestion Service (Completely Updated) ---
 class SuggestionService {
-  // MOSSES FIX: Updated to modern Gemini 2.5 Flash model
-  static const String _model = 'gemini-2.5-flash-preview-09-2025';
-  static const String _apiUrl =
-      '[https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=)';
+  
+  // =======================================================================
+  // CRITICAL ACTION: Paste your Google Apps Script Web App URL here.
+  // =======================================================================
+  static const String _appsScriptUrl = "https://script.google.com/macros/s/AKfycbyNDtjg-zyL4OZJlLacYhDuh0vpWFQsuqyMFWuMiLXyA15qMBtz0Fq3ZelpNkZiJMDN/exec";
+  // =======================================================================
 
-  // MOSSES FIX: Rewritten _callGemini for robustness
-  static Future<SuggestionResult> _callGemini(String prompt,
-      {bool isJson = false, int retries = 3}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? apiKey = prefs.getString('gemini_api_key');
-
-    if (apiKey == null || apiKey.isEmpty) {
-      debugPrint("Gemini API Error: Key is missing.");
-      return SuggestionResult(error: "NO_API_KEY");
+  /// Calls the Google Apps Script backend proxy.
+  /// This is the new single point of contact for all AI features.
+  static Future<SuggestionResult> _callAppsScript(
+      String action, Map<String, dynamic> body) async {
+        
+    // Check if the developer has set the URL.
+    if (_appsScriptUrl.contains("PASTE_YOUR_DEPLOYED_WEB_APP_URL_HERE")) {
+      debugPrint("CRITICAL: _appsScriptUrl is not set in services.dart.");
+      // Return the "NO_API_KEY" error so the UI can display a helpful message.
+      return SuggestionResult(error: "NO_API_KEY"); 
     }
 
-    final url = Uri.parse('$_apiUrl$apiKey');
-    int retryCount = 0;
-    int delay = 1000;
+    // Add the specific action to the request body
+    body['action'] = action;
 
-    final generationConfig = isJson
-        ? {
-            "responseMimeType": "application/json",
-            "responseSchema": {
-              "type": "OBJECT",
-              "properties": {
-                "tasks": {
-                  "type": "ARRAY",
-                  "items": {"type": "STRING"}
-                }
-              },
-            }
-          }
-        : null;
+    // Get the current user's Firebase Auth ID Token.
+    // This securely proves to your backend *who* is making the call.
+    final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
 
-    final payload = {
-      'contents': [
-        {
-          'role': 'user',
-          'parts': [
-            {'text': prompt}
-          ]
+    try {
+      final response = await http.post(
+        Uri.parse(_appsScriptUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken', // Send the token for verification
+        },
+        body: json.encode(body),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['error'] != null) {
+          debugPrint("Google Apps Script Error: ${data['error']}");
+          return SuggestionResult(error: data['error']);
         }
-      ],
-      if (generationConfig != null)
-        'generationConfig': generationConfig
-    };
-
-    while (retryCount < retries) {
-      try {
-        final response = await http.post(
-          url,
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode(payload),
-        );
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          
-          if (data['candidates'] == null || data['candidates'].isEmpty) {
-             debugPrint("Gemini API Error: No candidates in response.");
-             return SuggestionResult(error: "API_ERROR: No content generated.");
-          }
-
-          final text =
-              data['candidates'][0]['content']['parts'][0]['text'].trim();
-          return SuggestionResult(suggestion: text);
-
-        } else if (response.statusCode == 400) {
-          final errorBody = json.decode(response.body);
-          final errorMessage = errorBody['error']?['message'] ?? 'Invalid request.';
-          debugPrint("Gemini API Error 400: $errorMessage");
-          return SuggestionResult(error: "API_ERROR: $errorMessage");
-
-        } else if (response.statusCode == 429 || response.statusCode >= 500) {
-          // Quota exhausted or server error, wait and retry
-          debugPrint("Gemini API Error ${response.statusCode}, retrying in ${delay}ms...");
-          await Future.delayed(Duration(milliseconds: delay));
-          retryCount++;
-          delay *= 2; // Exponential backoff
-        } else {
-          // Other client error (401, 403, 404)
-          final errorBody = json.decode(response.body);
-          final errorMessage = errorBody['error']?['message'] ?? 'Unknown API error.';
-          debugPrint("Gemini API Error ${response.statusCode}: $errorMessage");
-          return SuggestionResult(error: "API_ERROR: $errorMessage");
-        }
-      } catch (e) {
-        debugPrint("Gemini connection Error: $e");
-        return SuggestionResult(error: "NETWORK_ERROR");
+        return SuggestionResult(suggestion: data['suggestion']);
+      } else {
+        // Handle non-200 HTTP responses
+        debugPrint(
+            "Apps Script HTTP Error ${response.statusCode}: ${response.body}");
+        return SuggestionResult(error: "HTTP_ERROR_${response.statusCode}");
       }
+    } catch (e) {
+      // Handle network or connection errors
+      debugPrint("Apps Script connection error: $e");
+      return SuggestionResult(error: "NETWORK_ERROR");
     }
-    
-    // If we've exhausted retries
-    return SuggestionResult(error: "API_ERROR: Request failed after $retries retries.");
   }
 
   static Future<SuggestionResult> getSuggestion(
@@ -361,62 +329,38 @@ class SuggestionService {
     final prompt =
         "My current milestone is '${nextMilestone.title}' due on ${DateFormat.yMMMd().format(nextMilestone.deadline)}. My next task is: ${nextCheckpoint.title}. What is a single, concise, and actionable tip to help me with this specific task? Keep it short and motivating.";
 
-    return _callGemini(prompt);
+    // Call the new Apps Script backend
+    debugPrint("Requesting suggestion from backend...");
+    return _callAppsScript('getSuggestion', {'prompt': prompt});
   }
 
-  // MOSSES FIX: Updated prompt for reliability and set isJson = true
   static Future<SuggestionResult> getTaskSuggestions(
       String goalTitle, String milestoneTitle) async {
-    final prompt = """
-    A user is planning their goal.
-    Main Goal: "$goalTitle"
-    Current Milestone: "$milestoneTitle"
-    
-    Suggest 3 to 4 actionable, specific sub-tasks for this milestone.
-    """;
-
-    try {
-      // MOSSES FIX: Call _callGemini with isJson = true
-      final result = await _callGemini(prompt, isJson: true);
-      
-      if (result.suggestion != null) {
-        // The API will now return a clean JSON string: '{"tasks": ["Task 1", "Task 2"]}'
-        // We return this string directly for the UI to decode.
-        return SuggestionResult(suggestion: result.suggestion);
-      } else {
-        return result; // Pass the error up
-      }
-    } catch (e) {
-      debugPrint("Error in getTaskSuggestions: $e");
-      return SuggestionResult(error: "DECODING_ERROR");
-    }
+        
+    debugPrint("Requesting task suggestions from backend...");
+    // Call the new Apps Script backend
+    return _callAppsScript('getTaskSuggestions', {
+      'goalTitle': goalTitle,
+      'milestoneTitle': milestoneTitle,
+    });
   }
 
-  // MOSSES FIX: Updated prompt to be more concise
   static Future<String> getMonthlyReportSummary(
       Map<String, dynamic> currentData,
       Map<String, dynamic> previousData) async {
-    final prompt = """
-      Generate a concise, encouraging, single-paragraph monthly performance report.
-      Focus on positive reinforcement. If no progress was made, be gentle but note the consequences.
-      Do not use markdown.
+        
+    debugPrint("Requesting monthly summary from backend...");
+    // Call the new Apps Script backend
+    final result = await _callAppsScript('getMonthlyReportSummary', {
+      'currentData': currentData,
+      'previousData': previousData,
+    });
 
-      Data:
-      - This month's time: ${currentData['timeSpent']}
-      - This month's tasks: ${currentData['tasksCompleted']}
-      - Last month's time: ${previousData['timeSpent']}
-      - Last month's tasks: ${previousData['tasksCompleted']}
-
-      Example:
-      "Great work this month! You dedicated a solid amount of time to your goals and made tangible progress. You've shown fantastic consistency. Keep that momentum going into next month!"
-      """;
-    final result = await _callGemini(prompt);
-    return result.suggestion ??
-        "Could not generate summary at this time."; // Return a simple fallback
+    return result.suggestion ?? "Could not generate summary at this time.";
   }
 }
 
-// --- NEW: Quote Service for Fallback Content ---
+// --- Quote Service for Fallback Content (unchanged) ---
 class QuoteService {
   static const String _quoteIndexKey = 'last_quote_index';
   static const List<String> _quotes = [

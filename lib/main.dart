@@ -1,14 +1,25 @@
+/*
+ * @author Mosses
+ * @version 1.1.0
+ * --- CHANGELOG ---
+ * v1.1.0: Implemented timer recovery logic on app startup.
+ * App now checks SharedPreferences for 'kRecoveryTimeKey'.
+ * If found, adds the lost time to the correct milestone
+ * and notifies the user via a SnackBar.
+ */
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'dart:io' show Platform;
-// import 'package:flutter_dotenv/flutter_dotenv.dart'; // MOSSES FIX: DELETED
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Import for recovery
 import 'firebase_options.dart';
 
 import './models.dart';
@@ -16,6 +27,10 @@ import './services.dart';
 import './ui.dart';
 import './auth_screen.dart';
 import './notification_service.dart';
+
+// --- Keys for SharedPreferences Timer Recovery ---
+const String kRecoveryTimeKey = 'recovery_time_seconds';
+const String kRecoveryMilestoneKey = 'recovery_milestone_id';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -35,13 +50,18 @@ class ThemeProvider with ChangeNotifier {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // await dotenv.load(fileName: ".env"); // MOSSES FIX: DELETED
-
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
   await NotificationService().init();
+
+  if (!kIsWeb && Platform.isAndroid) {
+    var status = await Permission.notification.status;
+    if (status.isDenied) {
+      await Permission.notification.request();
+    }
+  }
 
   const MethodChannel timezoneChannel =
       MethodChannel('com.example.trackit/timezone');
@@ -191,7 +211,7 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
-    _loadGoals();
+    _loadGoalsAndRecover(); // Load goals AND check for lost time
     _configureSelectNotificationSubject();
   }
 
@@ -239,16 +259,60 @@ class _MainPageState extends State<MainPage> {
     });
   }
 
-  Future<void> _loadGoals() async {
+  /// Loads all goals from Firestore and checks for any recovered timer data.
+  Future<void> _loadGoalsAndRecover() async {
     setState(() => _isLoading = true);
     final persistenceService =
         Provider.of<FirestoreService>(context, listen: false);
+
+    // 1. Load goals from persistence
     final goals = await persistenceService.loadGoals();
+    if (!mounted) return;
+
+    _allGoals = goals;
+    _updateMilestoneLockStatus(); // Update lock status *before* recovery logic
+
+    // 2. Check for recovered timer data
+    final prefs = await SharedPreferences.getInstance();
+    final int? recoveredSeconds = prefs.getInt(kRecoveryTimeKey);
+    final String? recoveredMilestoneId = prefs.getString(kRecoveryMilestoneKey);
+
+    // Check if we have valid recovery data
+    if (recoveredSeconds != null &&
+        recoveredSeconds > 0 &&
+        recoveredMilestoneId != null) {
+      debugPrint(
+          "RECOVERY: Found $recoveredSeconds seconds for milestone $recoveredMilestoneId");
+
+      // Add the recovered time to the milestone
+      // We call this *before* setting isLoading to false
+      _addTimeToMilestone(
+          recoveredMilestoneId, Duration(seconds: recoveredSeconds));
+
+      // Clear the keys so this doesn't run again on next launch
+      await prefs.remove(kRecoveryTimeKey);
+      await prefs.remove(kRecoveryMilestoneKey);
+
+      // Notify the user after the UI has built
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  "Recovered ${recoveredSeconds}s from your last session."),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      });
+    } else {
+      debugPrint("RECOVERY: No recovery data found.");
+    }
+
+    // 3. Set loading to false
     if (mounted) {
       setState(() {
-        _allGoals = goals;
         _isLoading = false;
-        _updateMilestoneLockStatus();
       });
     }
   }
@@ -404,12 +468,25 @@ class _MainPageState extends State<MainPage> {
   }
 
   void _addTimeToMilestone(String milestoneId, Duration timeToAdd) {
+    // Guard against adding time to a non-existent goal
+    if (_activeGoal == null) {
+      debugPrint("RECOVERY: Could not add time. Active goal is null.");
+      return;
+    }
+
     setState(() {
+      // Find the milestone safely.
       final milestone =
           _activeGoal?.milestones.firstWhere((m) => m.id == milestoneId);
+
       if (milestone != null) {
         milestone.timeSpent += timeToAdd;
         milestone.lastWorkedOn = DateTime.now();
+        debugPrint(
+            "RECOVERY: Successfully added ${timeToAdd.inSeconds}s to ${milestone.title}");
+      } else {
+        debugPrint(
+            "RECOVERY: Could not find milestone $milestoneId to add time to.");
       }
     });
     _saveGoals();
