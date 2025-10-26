@@ -1,25 +1,86 @@
 /*
  * @author Mosses
- * @version 1.1.0
+ * @version 1.2.0
  * --- CHANGELOG ---
- * v1.1.0: Removed direct Gemini API calls.
- * Pivoted to using a Google Apps Script proxy for all AI features.
- * Removed _callGemini, added _callAppsScript.
- * Ensures API key is 100% server-side and free.
+ * v1.2.0:
+ * - [PERF] Refactored all report getters (getWeeklyReport, etc.) to use Streams 
+ * instead of Futures. This enables real-time data updates on the reports page.
+ * - [PERF] Added `compute` function and a top-level `_processPeriodData` helper 
+ * to move all heavy report calculations to a background isolate. 
+ * This fixes the UI lag/freeze on the reports page.
+ * - [FIX] Report logic now correctly counts tasks completed *within* a period 
+ * by summing 'Done' check-ins, instead of just total completed tasks.
+ * - [FEAT] Added `getGoalsStream` to provide a real-time stream of all user goals.
  */
 
 import 'dart:convert';
-// import 'dart:math'; // For random quote index
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show ChangeNotifier, debugPrint;
+// import 'package:flutter/material.dart';
+// --- FIX: Import for 'compute' function ---
+import 'package:flutter/foundation.dart'
+    show ChangeNotifier, debugPrint, compute;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http; // Kept for Apps Script calls
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import './models.dart';
 import './notification_service.dart'; // Import the new service
+
+// =======================================================================
+// TOP-LEVEL FUNCTION FOR BACKGROUND REPORT PROCESSING
+// =======================================================================
+/// This function runs in a separate isolate via `compute` to prevent UI lag.
+/// It MUST be a top-level function (not inside a class).
+Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
+  // Deserialize goals from JSON
+  final List<Goal> allGoals = (params['goals'] as List<dynamic>)
+      .map((g) => Goal.fromJson(g as Map<String, dynamic>))
+      .toList();
+  final DateTime start = params['start'] as DateTime;
+  final DateTime end = params['end'] as DateTime;
+
+  Duration totalTime = Duration.zero;
+  int tasksCompleted = 0;
+  Map<TaskCheckinStatus, int> checkinCounts = {
+    for (var status in TaskCheckinStatus.values) status: 0
+  };
+
+  for (final goal in allGoals) {
+    for (final milestone in goal.milestones) {
+      // User's original logic for time.
+      // Note: This is flawed as it adds *total* time if worked on in period.
+      // A better long-term fix is to log time with each check-in.
+      if (milestone.lastWorkedOn != null &&
+          milestone.lastWorkedOn!.isAfter(start) &&
+          milestone.lastWorkedOn!.isBefore(end)) {
+        totalTime += milestone.timeSpent;
+      }
+
+      // --- FIX: Logic is now correct ---
+      // We iterate check-ins to find tasks completed *in this period*.
+      for (final checkin in milestone.checkins) {
+        if (checkin.timestamp.isAfter(start) &&
+            checkin.timestamp.isBefore(end)) {
+          // Increment the count for the specific check-in status
+          checkinCounts[checkin.status] =
+              (checkinCounts[checkin.status] ?? 0) + 1;
+
+          // If the status was 'Done', count it as a completed task for the period
+          if (checkin.status == TaskCheckinStatus.done) {
+            tasksCompleted++;
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    'timeSpent': totalTime,
+    'tasksCompleted': tasksCompleted,
+    'checkinCounts': checkinCounts
+  };
+}
 
 // --- Auth Service (unchanged) ---
 class AuthService with ChangeNotifier {
@@ -79,7 +140,7 @@ class AuthService with ChangeNotifier {
   }
 }
 
-// --- Firestore Service (unchanged) ---
+// --- Firestore Service (Updated) ---
 class FirestoreService {
   final String? uid;
   FirestoreService(this.uid);
@@ -104,14 +165,24 @@ class FirestoreService {
     }
 
     final goalsCollection = userDoc.collection('goals');
+    // Write all goals in a batch for efficiency
+    final batch = _db.batch();
     for (var goal in allGoals) {
       goal.userId = uid;
-      await goalsCollection.doc(goal.id).set(goal.toJson());
+      final docRef = goalsCollection.doc(goal.id);
+      batch.set(docRef, goal.toJson());
     }
+    await batch.commit();
 
+    // Update the local cache
+    await _cacheGoals(allGoals);
+  }
+
+  /// Helper to update the SharedPreferences cache
+  Future<void> _cacheGoals(List<Goal> goals) async {
     final prefs = await SharedPreferences.getInstance();
     final String goalsJson =
-        json.encode(allGoals.map((g) => g.toJson()).toList());
+        json.encode(goals.map((g) => g.toJson()).toList());
     await prefs.setString(_localCacheKey, goalsJson);
   }
 
@@ -129,103 +200,157 @@ class FirestoreService {
     final goals =
         snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
 
-    final String goalsJson = json.encode(goals.map((g) => g.toJson()).toList());
-    await prefs.setString(_localCacheKey, goalsJson);
+    // Save to cache
+    await _cacheGoals(goals);
     return goals;
   }
 
-  Future<Map<String, dynamic>> _getPeriodData(DateTime start, DateTime end,
-      {bool isYearly = false}) async {
-    final allGoals = await loadGoals();
+  /// Helper to convert goal list to JSON-encodable format for `compute`
+  List<Map<String, dynamic>> _goalsToJson(List<Goal> goals) {
+    return goals.map((g) => g.toJson()).toList();
+  }
 
-    Duration totalTime = Duration.zero;
-    int tasksCompleted = 0;
-    Map<TaskCheckinStatus, int> checkinCounts = {
-      for (var status in TaskCheckinStatus.values) status: 0
-    };
-
-    for (final goal in allGoals) {
-      for (final milestone in goal.milestones) {
-        if (milestone.lastWorkedOn != null &&
-            milestone.lastWorkedOn!.isAfter(start) &&
-            milestone.lastWorkedOn!.isBefore(end)) {
-          totalTime += milestone.timeSpent;
-        }
-        tasksCompleted += milestone.completedCheckpointIds.length;
-
-        for (final checkin in milestone.checkins) {
-          if (checkin.timestamp.isAfter(start) &&
-              checkin.timestamp.isBefore(end)) {
-            checkinCounts[checkin.status] =
-                (checkinCounts[checkin.status] ?? 0) + 1;
-          }
-        }
-      }
+  /// --- NEW: Provides a real-time stream of all goals ---
+  Stream<List<Goal>> getGoalsStream() {
+    if (uid == null) {
+      debugPrint("getGoalsStream: No UID, returning empty stream.");
+      return Stream.value([]);
     }
-    return {
-      'timeSpent': totalTime,
-      'tasksCompleted': tasksCompleted,
-      'checkinCounts': checkinCounts
-    };
+    final goalsCollection = _db.collection('users').doc(uid).collection('goals');
+    return goalsCollection.snapshots().map((snapshot) {
+      debugPrint("getGoalsStream: Received new goals snapshot.");
+      final goals =
+          snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
+      // Update cache in the background
+      _cacheGoals(goals);
+      return goals;
+    });
   }
 
-  Future<Map<String, dynamic>> getWeeklyReport() async {
-    final now = DateTime.now();
-    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-    final endOfWeek = startOfWeek.add(const Duration(days: 6));
-    final startOfLastWeek = startOfWeek.subtract(const Duration(days: 7));
+  /// --- REMOVED: `_getPeriodData` is now a top-level function ---
 
-    final currentData = await _getPeriodData(startOfWeek, endOfWeek);
-    final previousData = await _getPeriodData(startOfLastWeek, startOfWeek);
+  /// --- FIX: Changed to return a Stream and use `compute` ---
+  Stream<Map<String, dynamic>> getWeeklyReport() {
+    // Get the real-time stream of goals
+    return getGoalsStream().asyncMap((goals) async {
+      debugPrint("getWeeklyReport: Processing ${goals.length} goals...");
+      final now = DateTime.now();
+      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+      final endOfWeek = startOfWeek.add(const Duration(days: 6));
+      final startOfLastWeek = startOfWeek.subtract(const Duration(days: 7));
 
-    return {'currentPeriod': currentData, 'previousPeriod': previousData};
+      // Prepare data for background processing
+      final goalsJson = _goalsToJson(goals);
+      final currentParams = {
+        'goals': goalsJson,
+        'start': startOfWeek,
+        'end': endOfWeek
+      };
+      final previousParams = {
+        'goals': goalsJson,
+        'start': startOfLastWeek,
+        'end': startOfWeek
+      };
+
+      // --- PERF: Run both calculations in parallel on background threads ---
+      final results = await Future.wait([
+        compute(_processPeriodData, currentParams),
+        compute(_processPeriodData, previousParams)
+      ]);
+
+      debugPrint("getWeeklyReport: Processing complete.");
+      return {'currentPeriod': results[0], 'previousPeriod': results[1]};
+    });
   }
 
-  Future<Map<String, dynamic>> getMonthlyReport() async {
-    final now = DateTime.now();
-    final startOfMonth = DateTime(now.year, now.month, 1);
-    final endOfMonth = DateTime(now.year, now.month + 1, 0);
-    final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
+  /// --- FIX: Changed to return a Stream and use `compute` ---
+  Stream<Map<String, dynamic>> getMonthlyReport() {
+    return getGoalsStream().asyncMap((goals) async {
+      debugPrint("getMonthlyReport: Processing ${goals.length} goals...");
+      final now = DateTime.now();
+      final startOfMonth = DateTime(now.year, now.month, 1);
+      final endOfMonth = DateTime(now.year, now.month + 1, 0);
+      final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
 
-    final currentData = await _getPeriodData(startOfMonth, endOfMonth);
-    final previousData = await _getPeriodData(startOfLastMonth, startOfMonth);
+      final goalsJson = _goalsToJson(goals);
+      final currentParams = {
+        'goals': goalsJson,
+        'start': startOfMonth,
+        'end': endOfMonth
+      };
+      final previousParams = {
+        'goals': goalsJson,
+        'start': startOfLastMonth,
+        'end': startOfMonth
+      };
 
-    final summary = await SuggestionService.getMonthlyReportSummary(
-        currentData, previousData);
+      final results = await Future.wait([
+        compute(_processPeriodData, currentParams),
+        compute(_processPeriodData, previousParams)
+      ]);
 
-    return {
-      'currentPeriod': currentData,
-      'previousPeriod': previousData,
-      'summary': summary
-    };
+      final summary = await SuggestionService.getMonthlyReportSummary(
+          results[0], results[1]);
+
+      debugPrint("getMonthlyReport: Processing complete.");
+      return {
+        'currentPeriod': results[0],
+        'previousPeriod': results[1],
+        'summary': summary
+      };
+    });
   }
 
-  Future<Map<String, dynamic>> getYearlyReport() async {
-    final now = DateTime.now();
-    final startOfYear = DateTime(now.year, 1, 1);
-    final endOfYear = DateTime(now.year, 12, 31);
-    final startOfLastYear = DateTime(now.year - 1, 1, 1);
+  /// --- FIX: Changed to return a Stream and use `compute` ---
+  Stream<Map<String, dynamic>> getYearlyReport() {
+    return getGoalsStream().asyncMap((goals) async {
+      debugPrint("getYearlyReport: Processing ${goals.length} goals...");
+      final now = DateTime.now();
+      final startOfYear = DateTime(now.year, 1, 1);
+      final endOfYear = DateTime(now.year, 12, 31);
+      final startOfLastYear = DateTime(now.year - 1, 1, 1);
 
-    final currentData =
-        await _getPeriodData(startOfYear, endOfYear, isYearly: true);
-    final previousData = await _getPeriodData(startOfLastYear, startOfYear);
+      final goalsJson = _goalsToJson(goals);
+      final currentParams = {
+        'goals': goalsJson,
+        'start': startOfYear,
+        'end': endOfYear
+      };
+      final previousParams = {
+        'goals': goalsJson,
+        'start': startOfLastYear,
+        'end': startOfYear
+      };
 
-    final querySnapshot = await _db
-        .collection('archived_goals')
-        .where('userId', isEqualTo: uid)
-        .where('createdAt',
-            isGreaterThanOrEqualTo: startOfYear.toIso8601String())
-        .where('createdAt', isLessThanOrEqualTo: endOfYear.toIso8601String())
-        .get();
+      // Get archived goals (still a Future, that's fine)
+      final querySnapshot = _db
+          .collection('archived_goals')
+          .where('userId', isEqualTo: uid)
+          .where('createdAt',
+              isGreaterThanOrEqualTo: startOfYear.toIso8601String())
+          .where('createdAt', isLessThanOrEqualTo: endOfYear.toIso8601String())
+          .get();
 
-    final archivedGoals =
-        querySnapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
+      // Run compute tasks and DB query in parallel
+      final results = await Future.wait([
+        compute(_processPeriodData, currentParams),
+        compute(_processPeriodData, previousParams),
+        querySnapshot,
+      ]);
 
-    return {
-      'currentPeriod': currentData,
-      'previousPeriod': previousData,
-      'archivedGoals': archivedGoals
-    };
+      final archivedGoals =
+          (results[2] as QuerySnapshot<Map<String, dynamic>>)
+              .docs
+              .map((doc) => Goal.fromJson(doc.data()))
+              .toList();
+
+      debugPrint("getYearlyReport: Processing complete.");
+      return {
+        'currentPeriod': results[0] as Map<String, dynamic>,
+        'previousPeriod': results[1] as Map<String, dynamic>,
+        'archivedGoals': archivedGoals
+      };
+    });
   }
 }
 
@@ -239,23 +364,22 @@ class SuggestionResult {
 
 // --- Suggestion Service (Completely Updated) ---
 class SuggestionService {
-  
   // =======================================================================
   // CRITICAL ACTION: Paste your Google Apps Script Web App URL here.
   // =======================================================================
-  static const String _appsScriptUrl = "https://script.google.com/macros/s/AKfycbyNDtjg-zyL4OZJlLacYhDuh0vpWFQsuqyMFWuMiLXyA15qMBtz0Fq3ZelpNkZiJMDN/exec";
+  static const String _appsScriptUrl =
+      "https://script.google.com/macros/s/AKfycbyNDtjg-zyL4OZJlLacYhDuh0vpWFQsuqyMFWuMiLXyA15qMBtz0Fq3ZelpNkZiJMDN/exec";
   // =======================================================================
 
   /// Calls the Google Apps Script backend proxy.
   /// This is the new single point of contact for all AI features.
   static Future<SuggestionResult> _callAppsScript(
       String action, Map<String, dynamic> body) async {
-        
     // Check if the developer has set the URL.
     if (_appsScriptUrl.contains("PASTE_YOUR_DEPLOYED_WEB_APP_URL_HERE")) {
       debugPrint("CRITICAL: _appsScriptUrl is not set in services.dart.");
       // Return the "NO_API_KEY" error so the UI can display a helpful message.
-      return SuggestionResult(error: "NO_API_KEY"); 
+      return SuggestionResult(error: "NO_API_KEY");
     }
 
     // Add the specific action to the request body
@@ -336,7 +460,6 @@ class SuggestionService {
 
   static Future<SuggestionResult> getTaskSuggestions(
       String goalTitle, String milestoneTitle) async {
-        
     debugPrint("Requesting task suggestions from backend...");
     // Call the new Apps Script backend
     return _callAppsScript('getTaskSuggestions', {
@@ -348,7 +471,6 @@ class SuggestionService {
   static Future<String> getMonthlyReportSummary(
       Map<String, dynamic> currentData,
       Map<String, dynamic> previousData) async {
-        
     debugPrint("Requesting monthly summary from backend...");
     // Call the new Apps Script backend
     final result = await _callAppsScript('getMonthlyReportSummary', {

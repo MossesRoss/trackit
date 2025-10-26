@@ -1,12 +1,25 @@
+/*
+ * @author Mosses
+ * @version 1.2.0
+ * --- CHANGELOG ---
+ * v1.2.0:
+ * - [PERF] Replaced all `FutureBuilder` widgets with `StreamBuilder` widgets.
+ * - [FIX] Connected report views to the new real-time streams from 
+ * FirestoreService, ensuring data updates live after notification taps.
+ * v1.1.0:
+ * - [FEAT] Moved overall progress chart to a new 'Overall' tab per user request.
+ * - [PERF] Removed LayoutBuilder from pie chart and gave it a fixed size to reduce lag.
+ * - [STYLE] Added vertical spacing to the chart in its new tab.
+ */
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart'; // --- NEW: Import fl_chart ---
-import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart'; // Import fl_chart
+// import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 // FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
 
-// Fully responsive now
+// --- PERFORMANCE FIX: Removed LayoutBuilder ---
 class ProgressPieChart extends StatelessWidget {
   final int completed;
   final int total;
@@ -17,58 +30,50 @@ class ProgressPieChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final double percentage = total == 0 ? 0 : completed / total;
 
-    // Use LayoutBuilder to get parent constraints
-    return LayoutBuilder(builder: (context, constraints) {
-      // Calculate sizes based on the smallest dimension of the parent
-      final double chartSize = constraints.maxWidth < constraints.maxHeight
-          ? constraints.maxWidth
-          : constraints.maxHeight;
+    // --- PERFORMANCE FIX: Use fixed sizes ---
+    const double chartSize = 220.0;
+    const double radius = chartSize * 0.35;
+    const double centerSpaceRadius = chartSize * 0.25;
+    const double titleFontSize = chartSize * 0.1;
 
-      // Calculate dynamic radius and font size
-      final double radius = chartSize * 0.35; // 35% of the available size
-      final double centerSpaceRadius = chartSize * 0.25; // 25%
-      final double titleFontSize = chartSize * 0.1; // 10%
-
-      return Container(
-        width: chartSize,
-        height: chartSize,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Theme.of(context).dividerColor,
-            width: 2,
-          ),
+    return Container(
+      width: chartSize,
+      height: chartSize,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).dividerColor,
+          width: 2,
         ),
-        child: PieChart(
-          PieChartData(
-            sections: [
-              PieChartSectionData(
-                  color: Colors.green.shade400,
-                  value: percentage * 100,
-                  title: '${(percentage * 100).toStringAsFixed(0)}%',
-                  radius: radius,
-                  titleStyle: TextStyle(
-                      fontSize: titleFontSize,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
-              PieChartSectionData(
-                color: Colors.grey.shade200,
-                value: (1 - percentage) * 100,
-                title: '',
+      ),
+      child: PieChart(
+        PieChartData(
+          sections: [
+            PieChartSectionData(
+                color: Colors.green.shade400,
+                value: percentage * 100,
+                title: '${(percentage * 100).toStringAsFixed(0)}%',
                 radius: radius,
-              ),
-            ],
-            centerSpaceRadius: centerSpaceRadius,
-            sectionsSpace: 2,
-          ),
+                titleStyle: const TextStyle(
+                    fontSize: titleFontSize,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
+            PieChartSectionData(
+              color: Colors.grey.shade200,
+              value: (1 - percentage) * 100,
+              title: '',
+              radius: radius,
+            ),
+          ],
+          centerSpaceRadius: centerSpaceRadius,
+          sectionsSpace: 2,
         ),
-      );
-    });
+      ),
+    );
   }
 }
 
 class ReportsPage extends StatefulWidget {
-  // --- NEW: Added activeGoal ---
   final Goal? activeGoal;
   const ReportsPage({super.key, this.activeGoal});
 
@@ -83,7 +88,8 @@ class _ReportsPageState extends State<ReportsPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // --- FIX: Add new tab ---
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -102,6 +108,8 @@ class _ReportsPageState extends State<ReportsPage>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
+            // --- FIX: Add new 'Overall' tab ---
+            Tab(text: 'Overall'),
             Tab(text: 'Weekly'),
             Tab(text: 'Monthly'),
             Tab(text: 'Yearly'),
@@ -111,20 +119,61 @@ class _ReportsPageState extends State<ReportsPage>
       body: TabBarView(
         controller: _tabController,
         children: [
+          // --- FIX: Add new 'Overall' view ---
+          OverallReportView(activeGoal: widget.activeGoal),
+
+          // --- FIX: Pass the new streams to ReportView ---
           ReportView(
             title: 'Weekly Report',
-            reportFuture: firestoreService.getWeeklyReport(),
-            // --- NEW: Pass activeGoal to weekly report ---
-            activeGoal: widget.activeGoal,
+            reportStream: firestoreService.getWeeklyReport(),
           ),
           ReportView(
             title: 'Monthly Report',
-            reportFuture: firestoreService.getMonthlyReport(),
+            reportStream: firestoreService.getMonthlyReport(),
           ),
           ReportView(
             title: 'Yearly Report',
-            reportFuture: firestoreService.getYearlyReport(),
+            reportStream: firestoreService.getYearlyReport(),
             isYearly: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- NEW: Widget for the 'Overall' tab ---
+class OverallReportView extends StatelessWidget {
+  final Goal? activeGoal;
+  const OverallReportView({super.key, this.activeGoal});
+
+  @override
+  Widget build(BuildContext context) {
+    if (activeGoal == null || activeGoal!.totalTasks == 0) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text(
+            "No active goal to display. Set a goal and complete tasks to see your progress here.",
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            "Overall Goal Progress",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          // --- STYLE: Add spacing ---
+          const SizedBox(height: 24),
+          ProgressPieChart(
+            completed: activeGoal!.completedTasks,
+            total: activeGoal!.totalTasks,
           ),
         ],
       ),
@@ -134,17 +183,16 @@ class _ReportsPageState extends State<ReportsPage>
 
 class ReportView extends StatelessWidget {
   final String title;
-  final Future<Map<String, dynamic>> reportFuture;
+  // --- FIX: Change from Future to Stream ---
+  final Stream<Map<String, dynamic>> reportStream;
   final bool isYearly;
-  // --- NEW: Added activeGoal ---
-  final Goal? activeGoal;
 
   const ReportView({
     super.key,
     required this.title,
-    required this.reportFuture,
+    // --- FIX: Update constructor ---
+    required this.reportStream,
     this.isYearly = false,
-    this.activeGoal, // --- NEW ---
   });
 
   String _formatDuration(Duration duration) {
@@ -157,8 +205,10 @@ class ReportView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: reportFuture,
+    // --- FIX: Change to StreamBuilder ---
+    return StreamBuilder<Map<String, dynamic>>(
+      // --- FIX: Use the new stream ---
+      stream: reportStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -177,38 +227,23 @@ class ReportView extends StatelessWidget {
         final previousPeriod =
             reportData['previousPeriod'] as Map<String, dynamic>;
         final summary = reportData['summary'] as String?;
-        final checkinCounts =
-            currentPeriod['checkinCounts'] as Map<TaskCheckinStatus, int>;
+        // --- FIX: Ensure checkinCounts is not null ---
+        final checkinCounts = (currentPeriod['checkinCounts']
+                as Map<TaskCheckinStatus, int>?) ??
+            {};
         final archivedGoals = reportData['archivedGoals'] as List<Goal>?;
 
-        final Duration currentDuration = currentPeriod['timeSpent'];
-        final int currentTasks = currentPeriod['tasksCompleted'];
-        final Duration previousDuration = previousPeriod['timeSpent'];
-        final int previousTasks = previousPeriod['tasksCompleted'];
+        final Duration currentDuration =
+            currentPeriod['timeSpent'] ?? Duration.zero;
+        final int currentTasks = currentPeriod['tasksCompleted'] ?? 0;
+        final Duration previousDuration =
+            previousPeriod['timeSpent'] ?? Duration.zero;
+        final int previousTasks = previousPeriod['tasksCompleted'] ?? 0;
 
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // --- NEW: Display Pie Chart if activeGoal is provided ---
-            if (activeGoal != null && activeGoal!.totalTasks > 0) ...[
-              const Text(
-                "Overall Goal Progress",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              AspectRatio(
-                aspectRatio: 1.5,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 48.0, vertical: 16.0),
-                  child: ProgressPieChart(
-                    completed: activeGoal!.completedTasks,
-                    total: activeGoal!.totalTasks,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
-            // --- End of new section ---
+            // --- FIX: Removed Pie Chart from here ---
 
             if (summary != null && summary.isNotEmpty) ...[
               const Text(
