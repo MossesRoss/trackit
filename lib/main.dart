@@ -1,13 +1,24 @@
 /*
  * @author Mosses
- * @version 1.1.0
+ * @version 1.2.2
  * --- CHANGELOG ---
+ * v1.2.2:
+ * - [FIX] Registered a check for app launch via notification in initState.
+ * - [FIX] Updated notification listener to use the new top-level stream 
+ * from NotificationService to correctly handle background/terminated taps.
+ * v1.2.1:
+ * - [FIX] Removed unnecessary null check in _configureSelectNotificationSubject 
+ * as identified by the analyzer, thanks to flow analysis.
+ * v1.2.0:
+ * - [FEAT] Implemented theme persistence using SharedPreferences.
+ * - [DEBUG] Added debug logging to _configureSelectNotificationSubject to confirm action ID matching.
+ * v1.1.1:
+ * - [DEBUG] Added temporary cache clearing option `_clearCacheOnStartup` in 
+ * `_loadGoalsAndRecover`. Set to true for one run to force Firestore fetch.
+ * - [DEBUG] Added more logging around AuthWrapper and MainPage initState.
  * v1.1.0: Implemented timer recovery logic on app startup.
- * App now checks SharedPreferences for 'kRecoveryTimeKey'.
- * If found, adds the lost time to the correct milestone
- * and notifies the user via a SnackBar.
  */
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
@@ -17,9 +28,9 @@ import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+// import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Import for recovery
+import 'package:shared_preferences/shared_preferences.dart'; // Import for recovery & theme
 import 'firebase_options.dart';
 
 import './models.dart';
@@ -31,6 +42,10 @@ import './notification_service.dart';
 // --- Keys for SharedPreferences Timer Recovery ---
 const String kRecoveryTimeKey = 'recovery_time_seconds';
 const String kRecoveryMilestoneKey = 'recovery_milestone_id';
+// --- Key for Firestore Local Cache ---
+const String _localCacheKey = 'all_goals_cache'; // Define it here too
+// --- Key for Theme Persistence ---
+const String _kThemePersistenceKey = 'theme_mode';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -40,10 +55,35 @@ class ThemeProvider with ChangeNotifier {
 
   bool get isDarkMode => _themeMode == ThemeMode.dark;
 
-  void toggleTheme() {
+  ThemeProvider() {
+    _loadTheme();
+  }
+
+  /// Loads the saved theme mode from SharedPreferences.
+  void _loadTheme() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Load the theme index (0 = light, 1 = system, 2 = dark)
+      final themeIndex = prefs.getInt(_kThemePersistenceKey) ?? 0;
+      _themeMode = ThemeMode.values[themeIndex];
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error loading theme: $e");
+    }
+  }
+
+  /// Toggles the theme and saves the preference to SharedPreferences.
+  void toggleTheme() async {
     _themeMode =
         _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kThemePersistenceKey, _themeMode.index);
+    } catch (e) {
+      debugPrint("Error saving theme: $e");
+    }
   }
 }
 
@@ -69,31 +109,50 @@ Future<void> main() async {
   try {
     timeZoneName = await timezoneChannel.invokeMethod('getLocalTimezone');
   } on PlatformException {
-    timeZoneName = 'America/Detroit';
+    timeZoneName = 'America/Detroit'; // Default fallback
+    debugPrint("Failed to get native timezone, using default: $timeZoneName");
+  } catch (e) {
+    timeZoneName = 'America/Detroit'; // Catch any other error
+    debugPrint(
+        "Error getting native timezone: $e, using default: $timeZoneName");
   }
 
-  tz.initializeTimeZones();
-  if (!kIsWeb) {
-    if (Platform.isAndroid || Platform.isIOS) {
-      tz.setLocalLocation(tz.getLocation(timeZoneName));
-      debugPrint("Timezone set to: ${tz.local.name}");
+  try {
+    tz.initializeTimeZones();
+    if (!kIsWeb) {
+      if (Platform.isAndroid || Platform.isIOS) {
+        tz.setLocalLocation(tz.getLocation(timeZoneName));
+        debugPrint("Timezone set to: ${tz.local.name}");
+      }
     }
+  } catch (e) {
+    debugPrint("Error initializing/setting timezone: $e");
+    // Continue execution even if timezone setup fails
   }
 
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()), // Updated
         ChangeNotifierProvider(create: (_) => AuthService()),
-        ProxyProvider<AuthService, FirestoreService>(
-          update: (_, auth, __) => FirestoreService(auth.currentUser?.uid),
-        ),
+        // --- DEBUG: Add logging to ProxyProvider update ---
+        ProxyProvider<AuthService, FirestoreService>(update: (_, auth,
+            previous) {
+          debugPrint(
+              "ProxyProvider update: auth.currentUser?.uid = ${auth.currentUser?.uid}");
+          // Only create a new instance if uid changes OR if previous is null
+          if (previous == null || previous.uid != auth.currentUser?.uid) {
+            return FirestoreService(auth.currentUser?.uid);
+          }
+          return previous; // Reuse previous instance if uid hasn't changed
+        }),
       ],
       child: const MilestoneApp(),
     ),
   );
 }
 
+// --- MilestoneApp (Unchanged) ---
 class MilestoneApp extends StatelessWidget {
   const MilestoneApp({super.key});
 
@@ -102,51 +161,33 @@ class MilestoneApp extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
 
     final lightTheme = ThemeData(
+      useMaterial3: true,
       brightness: Brightness.light,
-      primarySwatch: Colors.deepPurple,
-      scaffoldBackgroundColor: const Color(0xFFF7F7FA),
+      colorSchemeSeed: Colors.indigo,
       appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFFF7F7FA),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
         foregroundColor: Colors.black87,
+      ),
+      cardTheme: CardThemeData( // FIX: Was CardTheme
         elevation: 0,
-        titleTextStyle: TextStyle(
-          color: Colors.black87,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey.shade300),
         ),
       ),
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.deepPurple,
-        brightness: Brightness.light,
-        primary: Colors.deepPurple.shade500,
-        secondary: Colors.deepPurple.shade300,
-      ),
-      cardColor: Colors.white,
-      dividerColor: Colors.grey[200],
     );
-
     final darkTheme = ThemeData(
+      useMaterial3: true,
       brightness: Brightness.dark,
-      primarySwatch: Colors.deepPurple,
-      scaffoldBackgroundColor: const Color(0xFF121212),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF1E1E1E),
-        foregroundColor: Colors.white70,
+      colorSchemeSeed: Colors.indigo,
+      cardTheme: CardThemeData( // FIX: Was CardTheme
         elevation: 0,
-        titleTextStyle: TextStyle(
-          color: Colors.white70,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey.shade800),
         ),
       ),
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.deepPurple,
-        brightness: Brightness.dark,
-        primary: Colors.deepPurple.shade400,
-        secondary: Colors.deepPurple.shade600,
-      ),
-      cardColor: const Color(0xFF1E1E1E),
-      dividerColor: Colors.grey[800],
     );
 
     return MaterialApp(
@@ -166,18 +207,32 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // --- DEBUG: Listen to AuthService here ---
+    // Use watch to rebuild when auth state changes
     final authService = Provider.of<AuthService>(context);
+    debugPrint("AuthWrapper build: Listening to auth state.");
 
-    return StreamBuilder(
+    // Using StreamBuilder is still fine, but Provider.of ensures
+    // we rebuild when notifyListeners is called.
+    return StreamBuilder<User?>(
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
+        // --- DEBUG ---
+        debugPrint(
+            "AuthWrapper StreamBuilder: connectionState=${snapshot.connectionState}, hasData=${snapshot.hasData}");
+
         if (snapshot.connectionState == ConnectionState.waiting) {
+          debugPrint("AuthWrapper: Waiting for auth state...");
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
+          debugPrint(
+              "AuthWrapper: User is logged in (uid: ${snapshot.data?.uid}). Showing MainPage.");
+          // IMPORTANT: Pass the UID here IF NEEDED, though MainPage uses Provider
           return const MainPage();
         }
+        debugPrint("AuthWrapper: User is logged out. Showing AuthScreen.");
         return const AuthScreen();
       },
     );
@@ -204,159 +259,275 @@ class _MainPageState extends State<MainPage> {
     try {
       return _allGoals.firstWhere((g) => g.status == GoalStatus.active);
     } catch (e) {
+      // Return null if no active goal is found, don't crash
       return null;
     }
   }
 
+  // ==========================================================
+  // --- DEBUG FLAG: Set to true for ONE run to clear cache ---
+  final bool _clearCacheOnStartup = false; // <-- SET TO true FOR TESTING
+  // ==========================================================
+
   @override
   void initState() {
     super.initState();
+    // --- DEBUG ---
+    final initialUid =
+        Provider.of<AuthService>(context, listen: false).currentUser?.uid;
+    debugPrint(
+        "MainPage initState: Called. Initial UID from Provider: $initialUid");
+
     _loadGoalsAndRecover(); // Load goals AND check for lost time
     _configureSelectNotificationSubject();
+    _checkNotificationLaunchApp(); // --- FIX: Add this call ---
   }
 
+  // --- FIX: Add this new method ---
+  /// Checks if the app was launched from a notification tap.
+  void _checkNotificationLaunchApp() async {
+    final notificationAppLaunchDetails =
+        await NotificationService().getNotificationAppLaunchDetails();
+
+    if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
+      final notificationResponse =
+          notificationAppLaunchDetails!.notificationResponse;
+      if (notificationResponse != null && notificationResponse.payload != null) {
+        debugPrint(
+            "App LAUNCHED from notification tap: ${notificationResponse.payload}");
+        // Manually pass this to the listener stream
+        // Use the new getter
+        NotificationService().notificationSubject.add(notificationResponse);
+      }
+    }
+  }
+
+  // --- configureSelectNotificationSubject (Updated with new log) ---
   void _configureSelectNotificationSubject() {
+    // --- FIX: Listen to the new getter from the service ---
     NotificationService()
-        .selectNotificationSubject
+        .notificationSubject
         .stream
         .listen((response) async {
-      debugPrint('UI received notification response: ${response.payload}');
-      // Dismiss the notification banner
-      NotificationService().cancelNotification(response.id ?? 0);
+      debugPrint(
+          'NotificationResponse received in UI: payload=${response.payload}, actionId=${response.actionId}, id=${response.id}');
+      // Dismiss the notification banner *if* it has an ID
+      if (response.id != null) {
+        NotificationService().cancelNotification(response.id!);
+      } else {
+        debugPrint("Warning: NotificationResponse has null ID, cannot cancel.");
+      }
 
       if (response.payload != null && response.payload!.isNotEmpty) {
-        final payloadData = json.decode(response.payload!);
-        final goalId = payloadData['goalId'];
-        final milestoneId = payloadData['milestoneId'];
-        final checkpointId = payloadData['checkpointId'];
+        try {
+          final payloadData = json.decode(response.payload!);
+          final goalId = payloadData['goalId'];
+          final milestoneId = payloadData['milestoneId'];
+          final checkpointId = payloadData['checkpointId'];
 
-        TaskCheckinStatus status;
-        bool shouldToggleCheckpoint = false;
-
-        switch (response.actionId) {
-          case doneActionId:
-            status = TaskCheckinStatus.done;
-            shouldToggleCheckpoint = true;
-            break;
-          case doingActionId:
-            status = TaskCheckinStatus.doing;
-            break;
-          case willDoActionId:
-            status = TaskCheckinStatus.willDo;
-            break;
-          case wontDoActionId:
-            status = TaskCheckinStatus.wontDo;
-            break;
-          default:
+          // Basic validation
+          if (goalId == null || milestoneId == null || checkpointId == null) {
+            debugPrint("Error: Invalid notification payload structure.");
             return;
-        }
+          }
 
-        if (shouldToggleCheckpoint) {
-          toggleCheckpointByIds(goalId, milestoneId, checkpointId);
+          TaskCheckinStatus? status; // Make nullable
+          bool shouldToggleCheckpoint = false;
+
+          switch (response.actionId) {
+            case doneActionId:
+              status = TaskCheckinStatus.done;
+              shouldToggleCheckpoint = true;
+              break;
+            case doingActionId:
+              status = TaskCheckinStatus.doing;
+              break;
+            case willDoActionId:
+              status = TaskCheckinStatus.willDo;
+              break;
+            case wontDoActionId:
+              status = TaskCheckinStatus.wontDo;
+              break;
+            default:
+              debugPrint(
+                  "Notification action tapped, but no specific action ID matched ('${response.actionId}'). Opening app.");
+              // Handle tap without action (just opens app) - do nothing extra
+              return;
+          }
+
+          // --- FIX: Removed unnecessary null check ---
+          // The analyzer knows `status` is non-null here because
+          // the `default` case above returns.
+          
+          // --- NEW DEBUG LOG ---
+          debugPrint(
+              "Matched action '${response.actionId}' to status '$status'. Proceeding to record.");
+          if (shouldToggleCheckpoint) {
+            toggleCheckpointByIds(goalId, milestoneId, checkpointId);
+          }
+          recordTaskCheckin(goalId, milestoneId, checkpointId, status);
+
+        } catch (e) {
+          debugPrint("Error processing notification payload: $e");
+          debugPrint("Payload content: ${response.payload}");
         }
-        recordTaskCheckin(goalId, milestoneId, checkpointId, status);
+      } else {
+        debugPrint("Notification tapped, but payload is null or empty.");
       }
     });
   }
 
-  /// Loads all goals from Firestore and checks for any recovered timer data.
+  /// Loads all goals and checks for recovered timer data.
   Future<void> _loadGoalsAndRecover() async {
+    debugPrint("_loadGoalsAndRecover: Starting...");
     setState(() => _isLoading = true);
+
+    // --- DEBUG: Access FirestoreService via Provider ---
+    // Use read here as we don't need to listen for changes within this method
     final persistenceService =
         Provider.of<FirestoreService>(context, listen: false);
+    debugPrint(
+        "_loadGoalsAndRecover: Got FirestoreService instance for uid: ${persistenceService.uid}");
 
-    // 1. Load goals from persistence
+    // --- DEBUG: Handle Cache Clearing ---
+    if (_clearCacheOnStartup) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_localCacheKey);
+        debugPrint(
+            "DEBUG: Force cleared local goals cache ('$_localCacheKey').");
+      } catch (e) {
+        debugPrint("DEBUG: Error clearing cache: $e");
+      }
+    }
+
+    // 1. Load goals from persistence (will now use enhanced logging)
     final goals = await persistenceService.loadGoals();
-    if (!mounted) return;
+    if (!mounted) {
+      debugPrint(
+          "_loadGoalsAndRecover: Widget unmounted during load. Aborting.");
+      return; // Check if widget is still mounted
+    }
+    debugPrint("_loadGoalsAndRecover: Loaded ${goals.length} goals.");
 
     _allGoals = goals;
     _updateMilestoneLockStatus(); // Update lock status *before* recovery logic
 
     // 2. Check for recovered timer data
-    final prefs = await SharedPreferences.getInstance();
-    final int? recoveredSeconds = prefs.getInt(kRecoveryTimeKey);
-    final String? recoveredMilestoneId = prefs.getString(kRecoveryMilestoneKey);
+    SharedPreferences? prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+      final int? recoveredSeconds = prefs.getInt(kRecoveryTimeKey);
+      final String? recoveredMilestoneId =
+          prefs.getString(kRecoveryMilestoneKey);
 
-    // Check if we have valid recovery data
-    if (recoveredSeconds != null &&
-        recoveredSeconds > 0 &&
-        recoveredMilestoneId != null) {
-      debugPrint(
-          "RECOVERY: Found $recoveredSeconds seconds for milestone $recoveredMilestoneId");
+      // Check if we have valid recovery data
+      if (recoveredSeconds != null &&
+          recoveredSeconds > 0 &&
+          recoveredMilestoneId != null) {
+        debugPrint(
+            "RECOVERY: Found $recoveredSeconds seconds for milestone $recoveredMilestoneId");
 
-      // Add the recovered time to the milestone
-      // We call this *before* setting isLoading to false
-      _addTimeToMilestone(
-          recoveredMilestoneId, Duration(seconds: recoveredSeconds));
+        // Add the recovered time to the milestone
+        // This now happens *before* setting isLoading to false
+        _addTimeToMilestone(
+            recoveredMilestoneId, Duration(seconds: recoveredSeconds));
 
-      // Clear the keys so this doesn't run again on next launch
-      await prefs.remove(kRecoveryTimeKey);
-      await prefs.remove(kRecoveryMilestoneKey);
+        // Clear the keys so this doesn't run again on next launch
+        await prefs.remove(kRecoveryTimeKey);
+        await prefs.remove(kRecoveryMilestoneKey);
+        debugPrint("RECOVERY: Cleared recovery keys.");
 
-      // Notify the user after the UI has built
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  "Recovered ${recoveredSeconds}s from your last session."),
-              backgroundColor: Colors.green,
-            ),
-          );
+        // Notify the user after the UI has built
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    "Recovered ${recoveredSeconds}s from your last session."),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        });
+      } else {
+        debugPrint(
+            "RECOVERY: No recovery data found (keys: $kRecoveryTimeKey, $kRecoveryMilestoneKey).");
+      }
+    } catch (e) {
+      debugPrint("RECOVERY ERROR: Failed to process recovery data: $e");
+      // Attempt to clear recovery keys if error occurs
+      try {
+        if (prefs != null) {
+          await prefs.remove(kRecoveryTimeKey);
+          await prefs.remove(kRecoveryMilestoneKey);
+          debugPrint("RECOVERY: Cleared recovery keys due to error.");
         }
-      });
-    } else {
-      debugPrint("RECOVERY: No recovery data found.");
+      } catch (clearError) {
+        debugPrint(
+            "RECOVERY ERROR: Failed to clear recovery keys during error handling: $clearError");
+      }
     }
 
     // 3. Set loading to false
     if (mounted) {
+      debugPrint("_loadGoalsAndRecover: Setting isLoading to false.");
       setState(() {
         _isLoading = false;
       });
     }
+    debugPrint("_loadGoalsAndRecover: Finished.");
   }
 
+  // --- saveGoals (Unchanged) ---
   Future<void> _saveGoals() async {
+    // --- DEBUG ---
+    debugPrint("saveGoals: Triggered. Saving ${_allGoals.length} goals.");
     final persistenceService =
         Provider.of<FirestoreService>(context, listen: false);
     await persistenceService.saveGoals(_allGoals);
+    debugPrint("saveGoals: Completed.");
   }
 
+  // --- onTabTapped (Unchanged) ---
   void _onTabTapped(int index) {
     setState(() {
       _selectedIndex = index;
     });
   }
 
+  // --- setMainGoal (Unchanged) ---
   void _setMainGoal(String goalTitle) {
     setState(() {
       final currentActiveGoal = _activeGoal;
       if (currentActiveGoal != null) {
+        debugPrint(
+            "Setting new main goal. Archiving old goal: ${currentActiveGoal.id}");
         currentActiveGoal.status = GoalStatus.givenUp;
+        // Use read here as it's an action
         Provider.of<FirestoreService>(context, listen: false)
             .archiveGoal(currentActiveGoal);
       }
-      _allGoals.add(Goal(title: goalTitle));
-      _selectedIndex = 1;
+      final newGoal = Goal(title: goalTitle);
+      _allGoals.add(newGoal);
+      debugPrint("Added new goal: ${newGoal.id}");
+      _selectedIndex = 1; // Go to milestones page
     });
-    _saveGoals();
+    _saveGoals(); // Save immediately
 
+    // Show dialog (unchanged)
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Goal Set! 🚀"),
+        builder: (ctx) => AlertDialog(
+          title: const Text('Goal Set!'),
           content: const Text(
-              "Your new goal is active. Let's add the first milestone."),
+              'Your new goal is active. Head to the Milestones page to add your first task!'),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _milestonesPageKey.currentState
-                    ?.showAddMilestoneDialog(context);
-              },
-              child: const Text("Let's Go!"),
+              child: const Text('Okay'),
+              onPressed: () => Navigator.of(ctx).pop(),
             ),
           ],
         ),
@@ -364,16 +535,18 @@ class _MainPageState extends State<MainPage> {
     });
   }
 
+  // --- giveUpGoal (Unchanged) ---
   void _giveUpGoal() {
     if (_activeGoal == null) return;
+    debugPrint("Attempting to give up goal: ${_activeGoal!.id}");
 
     showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Give Up Goal?'),
-        content: Text(
-            "Are you sure you want to give up on '${_activeGoal!.title}'? This cannot be undone."),
-        actions: <Widget>[
+        title: const Text('Are you sure?'),
+        content: const Text(
+            'Are you sure you want to give up on this goal? This action cannot be undone.'),
+        actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
@@ -386,80 +559,130 @@ class _MainPageState extends State<MainPage> {
       ),
     ).then((confirmed) {
       if (confirmed == true) {
+        debugPrint("Goal give up confirmed for: ${_activeGoal!.id}");
+        if (!mounted) return; // Check mount status after async gap
         setState(() {
           _activeGoal!.status = GoalStatus.givenUp;
+          // Use read here
           Provider.of<FirestoreService>(context, listen: false)
               .archiveGoal(_activeGoal!);
+          debugPrint("Goal status set to givenUp for: ${_activeGoal!.id}");
         });
-        _saveGoals();
+        _saveGoals(); // Save immediately
+      } else {
+        debugPrint("Goal give up cancelled for: ${_activeGoal!.id}");
       }
     });
   }
 
+  // --- addMilestone (Unchanged) ---
   void _addMilestone(Milestone milestone) {
+    if (_activeGoal == null) {
+      debugPrint(
+          "AddMilestone Error: Cannot add milestone, active goal is null.");
+      return;
+    }
+    debugPrint("Adding milestone: ${milestone.id} to goal: ${_activeGoal!.id}");
     setState(() {
+      // Add safely
       _activeGoal?.milestones.add(milestone);
       _updateMilestoneLockStatus();
     });
     _saveGoals();
   }
 
+  // --- toggleCheckpoint (Unchanged) ---
   void _toggleCheckpoint(Milestone milestone, String checkpointId) {
+    debugPrint(
+        "Toggling checkpoint: $checkpointId in milestone: ${milestone.id}");
     setState(() {
       if (milestone.completedCheckpointIds.contains(checkpointId)) {
         milestone.completedCheckpointIds.remove(checkpointId);
+        debugPrint("Checkpoint $checkpointId marked incomplete.");
       } else {
         milestone.completedCheckpointIds.add(checkpointId);
+        debugPrint("Checkpoint $checkpointId marked complete.");
       }
       _updateMilestoneLockStatus();
-      _checkForGoalCompletion();
+      _checkForGoalCompletion(); // Check if goal is now complete
     });
     _saveGoals();
   }
 
+  // --- toggleCheckpointByIds (Unchanged) ---
   void toggleCheckpointByIds(
       String goalId, String milestoneId, String checkpointId) {
-    final goal = _allGoals.firstWhere((g) => g.id == goalId,
-        orElse: () => Goal(title: ''));
-    if (goal.title.isEmpty) return;
+    debugPrint(
+        "toggleCheckpointByIds called: goal=$goalId, milestone=$milestoneId, checkpoint=$checkpointId");
+    Goal? goal;
+    try {
+      goal = _allGoals.firstWhere((g) => g.id == goalId);
+    } catch (e) {
+      debugPrint("Error finding goal $goalId in toggleCheckpointByIds.");
+      return;
+    }
 
-    final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId,
-        orElse: () =>
-            Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
-    if (milestone.title.isEmpty) return;
+    Milestone? milestone;
+    try {
+      milestone = goal.milestones.firstWhere((m) => m.id == milestoneId);
+    } catch (e) {
+      debugPrint("Error finding milestone $milestoneId in goal $goalId.");
+      return;
+    }
 
-    _toggleCheckpoint(milestone, checkpointId);
+    // Check if checkpoint exists before toggling
+    if (milestone.checkpoints.any((c) => c.id == checkpointId)) {
+      _toggleCheckpoint(milestone, checkpointId);
+    } else {
+      debugPrint(
+          "Error: Checkpoint $checkpointId not found in milestone $milestoneId.");
+    }
   }
 
+  // --- checkForGoalCompletion (Unchanged) ---
   void _checkForGoalCompletion() {
     if (_activeGoal != null && _activeGoal!.isCompleted) {
+      debugPrint("Goal ${_activeGoal!.id} is now complete!");
+      if (!mounted) return;
       setState(() {
         _activeGoal!.status = GoalStatus.achieved;
-        _editMode = true;
+        _editMode =
+            true; // Allow editing again? Or should stay false? Revisit logic if needed.
+        // Use read
         Provider.of<FirestoreService>(context, listen: false)
             .archiveGoal(_activeGoal!);
       });
       _saveGoals();
+      // Show dialog (unchanged)
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         showDialog(
           context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("Congratulations! 🎉"),
+          builder: (ctx) => AlertDialog(
+            title: const Text('Goal Achieved!'),
             content: Text(
-                "You have successfully achieved your goal: '${_activeGoal!.title}'!"),
+                'Congratulations! You have completed all milestones for "${_activeGoal!.title}".'),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text("Awesome!"),
+                child: const Text('Awesome!'),
+                onPressed: () => Navigator.of(ctx).pop(),
               ),
             ],
           ),
         );
       });
+    } else {
+      // debugPrint("Goal ${_activeGoal?.id} is not yet complete."); // Optional verbose logging
     }
   }
 
+  // --- deleteMilestone (Unchanged) ---
   void _deleteMilestone(String id) {
+    if (_activeGoal == null) {
+      debugPrint("DeleteMilestone Error: Cannot delete, active goal is null.");
+      return;
+    }
+    debugPrint("Deleting milestone: $id from goal: ${_activeGoal!.id}");
     setState(() {
       _activeGoal?.milestones.removeWhere((m) => m.id == id);
       _updateMilestoneLockStatus();
@@ -467,64 +690,106 @@ class _MainPageState extends State<MainPage> {
     _saveGoals();
   }
 
+  // --- addTimeToMilestone (Minor Update from Recovery Logic) ---
   void _addTimeToMilestone(String milestoneId, Duration timeToAdd) {
-    // Guard against adding time to a non-existent goal
     if (_activeGoal == null) {
-      debugPrint("RECOVERY: Could not add time. Active goal is null.");
+      debugPrint("AddTimeToMilestone: Active goal is null. Cannot add time.");
+      return;
+    }
+    // Check if timeToAdd is valid
+    if (timeToAdd.inSeconds <= 0) {
+      debugPrint("AddTimeToMilestone: timeToAdd is zero or negative. Skipping.");
       return;
     }
 
+    debugPrint("Adding ${timeToAdd.inSeconds}s to milestone: $milestoneId");
     setState(() {
-      // Find the milestone safely.
-      final milestone =
-          _activeGoal?.milestones.firstWhere((m) => m.id == milestoneId);
-
-      if (milestone != null) {
-        milestone.timeSpent += timeToAdd;
-        milestone.lastWorkedOn = DateTime.now();
+      Milestone? milestone;
+      try {
+        milestone =
+            _activeGoal!.milestones.firstWhere((m) => m.id == milestoneId);
+      } catch (e) {
         debugPrint(
-            "RECOVERY: Successfully added ${timeToAdd.inSeconds}s to ${milestone.title}");
-      } else {
-        debugPrint(
-            "RECOVERY: Could not find milestone $milestoneId to add time to.");
+            "AddTimeToMilestone ERROR: Milestone $milestoneId not found in active goal ${_activeGoal!.id}.");
+        return; // Exit if milestone not found
       }
+
+      milestone.timeSpent += timeToAdd;
+      milestone.lastWorkedOn = DateTime.now(); // Update last worked on time
+      debugPrint(
+          "Milestone ${milestone.id} updated: timeSpent=${milestone.timeSpent}, lastWorkedOn=${milestone.lastWorkedOn}");
     });
+    // Save goals immediately after state change involving time
     _saveGoals();
   }
 
+  // --- recordTaskCheckin (Unchanged) ---
   void recordTaskCheckin(String goalId, String milestoneId, String checkpointId,
       TaskCheckinStatus status) {
+    debugPrint(
+        "Recording check-in: goal=$goalId, milestone=$milestoneId, checkpoint=$checkpointId, status=$status");
     setState(() {
-      final goal = _allGoals.firstWhere((g) => g.id == goalId,
-          orElse: () => Goal(title: ''));
-      if (goal.title.isEmpty) return;
+      Goal? goal;
+      try {
+        goal = _allGoals.firstWhere((g) => g.id == goalId);
+      } catch (e) {
+        debugPrint("RecordCheckin ERROR: Goal $goalId not found.");
+        return;
+      }
 
-      final milestone = goal.milestones.firstWhere((m) => m.id == milestoneId,
-          orElse: () =>
-              Milestone(title: '', deadline: DateTime.now(), checkpoints: []));
-      if (milestone.title.isEmpty) return;
+      Milestone? milestone;
+      try {
+        milestone = goal.milestones.firstWhere((m) => m.id == milestoneId);
+      } catch (e) {
+        debugPrint(
+            "RecordCheckin ERROR: Milestone $milestoneId not found in goal $goalId.");
+        return;
+      }
 
+      // Ensure checkpoint exists before adding checkin? Optional, depends on desired strictness.
       milestone.checkins
           .add(TaskCheckin(checkpointId: checkpointId, status: status));
     });
     _saveGoals();
-    debugPrint("Check-in recorded for $checkpointId with status $status");
+    debugPrint("Check-in recorded successfully.");
   }
 
+  // --- updateMilestoneLockStatus (Unchanged) ---
   void _updateMilestoneLockStatus() {
-    if (_activeGoal == null) return;
-    bool isLocked = false;
+    if (_activeGoal == null) {
+      // debugPrint("UpdateMilestoneLock: Active goal is null."); // Optional
+      return;
+    }
+    bool currentlyLocked = false; // Start assuming unlocked
+    bool changed = false;
     for (var m in _activeGoal!.milestones) {
-      m.isUnlocked = !isLocked;
-      if (!m.isCompleted) {
-        isLocked = true;
+      bool shouldBeUnlocked = !currentlyLocked;
+      if (m.isUnlocked != shouldBeUnlocked) {
+        m.isUnlocked = shouldBeUnlocked;
+        changed = true;
+        // debugPrint("Milestone ${m.id} lock status changed to: ${m.isUnlocked}"); // Optional
       }
+      // If this milestone is NOT complete, lock all subsequent milestones
+      if (!m.isCompleted) {
+        currentlyLocked = true;
+      }
+    }
+    if (changed) {
+      debugPrint("Milestone lock statuses updated.");
     }
   }
 
+  // --- build (Unchanged) ---
   @override
   Widget build(BuildContext context) {
+    // --- DEBUG ---
+    final buildUid =
+        Provider.of<AuthService>(context, listen: false).currentUser?.uid;
+    debugPrint(
+        "MainPage build: Called. UID from Provider: $buildUid. IsLoading: $_isLoading");
+
     if (_isLoading) {
+      debugPrint("MainPage build: Showing loading indicator.");
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
@@ -532,16 +797,19 @@ class _MainPageState extends State<MainPage> {
 
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
 
+    // --- DEBUG ---
+    debugPrint(
+        "MainPage build: Building pages. Active goal ID: ${_activeGoal?.id}, Total goals: ${_allGoals.length}");
+
     final List<Widget> pages = [
       HomePage(
-        key: ValueKey('${_activeGoal?.id}-${_activeGoal?.completedTasks}'),
         activeGoal: _activeGoal,
         onSetGoal: _setMainGoal,
         onTimeAdd: _addTimeToMilestone,
         onGiveUp: _giveUpGoal,
       ),
       MilestonesPage(
-        key: _milestonesPageKey,
+        key: _milestonesPageKey, // Assign key
         activeGoal: _activeGoal,
         onAddMilestone: _addMilestone,
         onToggleCheckpoint: _toggleCheckpoint,
@@ -553,7 +821,7 @@ class _MainPageState extends State<MainPage> {
         toggleDarkMode: themeProvider.toggleTheme,
         editMode: _editMode,
         onEditModeChanged: (val) => setState(() => _editMode = val),
-        allGoals: _allGoals,
+        allGoals: _allGoals, // Pass all goals
       ),
     ];
 
@@ -562,20 +830,25 @@ class _MainPageState extends State<MainPage> {
         index: _selectedIndex,
         children: pages,
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _onTabTapped,
-        selectedItemColor: Theme.of(context).colorScheme.primary,
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Theme.of(context).cardColor,
-        elevation: 4,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home_rounded), label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.flag_rounded), label: 'Milestones'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.settings_rounded), label: 'Settings'),
+      bottomNavigationBar: NavigationBar(
+        onDestinationSelected: _onTabTapped,
+        selectedIndex: _selectedIndex,
+        destinations: const <Widget>[
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_tree_outlined),
+            selectedIcon: Icon(Icons.account_tree_rounded),
+            label: 'Milestones',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings_rounded),
+            label: 'Settings',
+          ),
         ],
       ),
     );

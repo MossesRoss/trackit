@@ -1,19 +1,7 @@
-/*
- * @author Mosses
- * @version 1.2.0
- * --- CHANGELOG ---
- * v1.2.0: Added "Upgrade to Pro" button and dialog in SettingsPage
- * as requested. Dialog links to the UPI payment URL.
- * v1.1.0: Implemented robust timer recovery using SharedPreferences.
- * Timer now saves progress every 5 seconds to `kRecoveryTimeKey`.
- * Removed all UI related to setting/viewing the Gemini API key.
- * Updated error message to point to `services.dart` URL.
- */
-
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+// import 'package:flutter/foundation.dart' show debugPrint; // FIX: Unnecessary import
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -174,7 +162,8 @@ class _HomePageState extends State<HomePage> {
                                     .textTheme
                                     .bodyMedium
                                     ?.color
-                                    ?.withOpacity(0.8)),
+                                    // FIX: Replaced deprecated .withOpacity with .withAlpha
+                                    ?.withAlpha((255 * 0.8).round())), 
                           ),
                     const Spacer(),
                   ],
@@ -358,7 +347,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
               child: CircularProgressIndicator(
                 value: _animationController.value,
                 strokeWidth: 10,
-                backgroundColor: Colors.grey.shade300,
+                // --- FIX: Use theme-aware color ---
+                backgroundColor: Theme.of(context).dividerColor,
                 valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
               ),
             ),
@@ -442,6 +432,9 @@ class MilestonesPageState extends State<MilestonesPage> {
 
   @override
   Widget build(BuildContext context) {
+    // --- FIX: Get line color from theme ---
+    final Color lineColor = Theme.of(context).dividerColor;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Milestones'),
@@ -472,6 +465,7 @@ class MilestonesPageState extends State<MilestonesPage> {
                       onToggleCheckpoint: widget.onToggleCheckpoint,
                       onDelete: () => widget.onDeleteMilestone(milestone.id),
                       editMode: widget.editMode,
+                      lineColor: lineColor, // --- FIX: Pass line color ---
                     );
                   },
                 ),
@@ -479,7 +473,7 @@ class MilestonesPageState extends State<MilestonesPage> {
   }
 }
 
-// --- SettingsPage (Upgrade Button Added) ---
+// --- SettingsPage (Unchanged) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -616,8 +610,10 @@ class SettingsPage extends StatelessWidget {
               subtitle: Text(
                 "Unlock AI features & more!",
                 style: TextStyle(
-                  color:
-                      Theme.of(context).colorScheme.onPrimaryContainer.withOpacity(0.8),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onPrimaryContainer
+                      .withOpacity(0.8),
                 ),
               ),
               onTap: () => _showUpgradeDialog(context),
@@ -823,7 +819,7 @@ class _GoalSetterCardState extends State<GoalSetterCard> {
   }
 }
 
-// --- MilestoneNode (Unchanged) ---
+// --- MilestoneNode (FIXED Dark Mode) ---
 class MilestoneNode extends StatelessWidget {
   final Milestone milestone;
   final bool isFirst;
@@ -831,6 +827,7 @@ class MilestoneNode extends StatelessWidget {
   final Function(Milestone, String) onToggleCheckpoint;
   final VoidCallback onDelete;
   final bool editMode;
+  final Color lineColor; // --- FIX: Added line color ---
 
   const MilestoneNode(
       {super.key,
@@ -839,7 +836,9 @@ class MilestoneNode extends StatelessWidget {
       required this.isLast,
       required this.onToggleCheckpoint,
       required this.onDelete,
-      required this.editMode});
+      required this.editMode,
+      required this.lineColor // --- FIX: Added line color ---
+      });
 
   String _formatDuration(Duration duration) {
     if (duration.inMinutes == 0) return "${duration.inSeconds}s";
@@ -910,11 +909,24 @@ class MilestoneNode extends StatelessWidget {
         : milestone.isUnlocked
             ? Theme.of(context).colorScheme.primary
             : Colors.grey;
-    final Color lightColor = milestone.isCompleted
-        ? Colors.green.shade100
-        : milestone.isUnlocked
-            ? Theme.of(context).colorScheme.primary.withOpacity(0.1)
-            : Colors.grey.shade200;
+
+    // --- FIX: Use theme-aware colors for dark mode ---
+    final Color lightColor;
+    if (milestone.isCompleted) {
+      lightColor = Colors.green.withOpacity(0.1);
+    } else if (milestone.isUnlocked) {
+      lightColor = Theme.of(context).colorScheme.primary.withOpacity(0.1);
+    } else {
+      // FIX: Replaced deprecated .surfaceVariant with .surfaceContainerHighest
+      lightColor = Theme.of(context)
+          .colorScheme
+          .surfaceContainerHighest
+          .withOpacity(0.5);
+    }
+
+    final Color? subtitleColor = milestone.isUnlocked
+        ? Theme.of(context).textTheme.bodySmall?.color
+        : Theme.of(context).disabledColor;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -926,7 +938,9 @@ class MilestoneNode extends StatelessWidget {
             children: [
               CustomPaint(
                 size: const Size(2, 80),
-                painter: LinePainter(isFirst: isFirst, isLast: isLast),
+                // --- FIX: Pass theme-aware line color ---
+                painter:
+                    LinePainter(isFirst: isFirst, isLast: isLast, lineColor: lineColor),
               ),
               Container(
                 width: 20,
@@ -963,18 +977,29 @@ class MilestoneNode extends StatelessWidget {
                 title: Text(milestone.title,
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: milestone.isUnlocked ? null : Colors.grey)),
+                        // --- FIX: Use theme-aware disabled color ---
+                        color: milestone.isUnlocked
+                            ? null
+                            : Theme.of(context).disabledColor)),
                 subtitle: Row(
                   children: [
                     Text(
-                        'Due: ${DateFormat.yMMMd().format(milestone.deadline)}'),
+                      'Due: ${DateFormat.yMMMd().format(milestone.deadline)}',
+                      // --- FIX: Use theme-aware disabled color ---
+                      style: TextStyle(
+                          color: milestone.isUnlocked
+                              ? null
+                              : Theme.of(context).disabledColor),
+                    ),
                     const Spacer(),
                     if (milestone.timeSpent > Duration.zero) ...[
+                      // --- FIX: Use theme-aware disabled color ---
                       Icon(Icons.timer_outlined,
-                          size: 14, color: Colors.grey.shade600),
+                          size: 14, color: subtitleColor),
                       const SizedBox(width: 4),
                       Text(_formatDuration(milestone.timeSpent),
-                          style: TextStyle(color: Colors.grey.shade600)),
+                          // --- FIX: Use theme-aware disabled color ---
+                          style: TextStyle(color: subtitleColor)),
                     ]
                   ],
                 ),
@@ -988,7 +1013,8 @@ class MilestoneNode extends StatelessWidget {
                         if (milestone.checkpoints.isNotEmpty) ...[
                           LinearProgressIndicator(
                             value: milestone.progress,
-                            backgroundColor: Colors.grey.shade300,
+                            // --- FIX: Use theme-aware color ---
+                            backgroundColor: Theme.of(context).dividerColor,
                             valueColor:
                                 AlwaysStoppedAnimation<Color>(primaryColor),
                           ),
@@ -1037,16 +1063,23 @@ class MilestoneNode extends StatelessWidget {
   }
 }
 
-// --- LinePainter (Unchanged) ---
+// --- LinePainter (FIXED Dark Mode) ---
 class LinePainter extends CustomPainter {
   final bool isFirst;
   final bool isLast;
-  LinePainter({required this.isFirst, required this.isLast});
+  final Color lineColor; // --- FIX: Added line color ---
+  
+  LinePainter({
+    required this.isFirst, 
+    required this.isLast, 
+    required this.lineColor // --- FIX: Added line color ---
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // --- FIX: Use theme-aware line color ---
     final paint = Paint()
-      ..color = Colors.grey.shade300
+      ..color = lineColor
       ..strokeWidth = 2;
 
     if (!isFirst) {
@@ -1248,21 +1281,29 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
   }
 }
 
-// --- MyJourneyPage (Unchanged) ---
+// --- MyJourneyPage (UPDATED with navigation) ---
 class MyJourneyPage extends StatelessWidget {
   final List<Goal> allGoals;
   const MyJourneyPage({super.key, required this.allGoals});
 
   @override
   Widget build(BuildContext context) {
+    // Sort goals so active one is at the top
+    List<Goal> sortedGoals = List.from(allGoals);
+    sortedGoals.sort((a, b) {
+      if (a.status == GoalStatus.active) return -1;
+      if (b.status == GoalStatus.active) return 1;
+      return b.createdAt.compareTo(a.createdAt); // Show newest first
+    });
+
     return Scaffold(
       appBar: AppBar(title: const Text("My Journey")),
-      body: allGoals.isEmpty
+      body: sortedGoals.isEmpty
           ? const Center(child: Text("Your journey hasn't started yet!"))
           : ListView.builder(
-              itemCount: allGoals.length,
+              itemCount: sortedGoals.length,
               itemBuilder: (context, index) {
-                final goal = allGoals[index];
+                final goal = sortedGoals[index];
                 Color color;
                 IconData icon;
                 final String statusText = goal.status.name[0].toUpperCase() +
@@ -1285,15 +1326,24 @@ class MyJourneyPage extends StatelessWidget {
                 return Card(
                   margin:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: ListTile(
-                    leading: Icon(icon, color: color),
-                    title: Text(goal.title,
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(
-                        "Set on: ${DateFormat.yMMMd().format(goal.createdAt)}"),
-                    trailing: Text(statusText.toUpperCase(),
-                        style: TextStyle(
-                            color: color, fontWeight: FontWeight.bold)),
+                  // --- NEW: Wrap in InkWell for tap ---
+                  child: InkWell(
+                    onTap: () {
+                      // --- NEW: Navigate to details page ---
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => GoalDetailsPage(goal: goal),
+                      ));
+                    },
+                    child: ListTile(
+                      leading: Icon(icon, color: color),
+                      title: Text(goal.title,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(
+                          "Set on: ${DateFormat.yMMMd().format(goal.createdAt)}"),
+                      trailing: Text(statusText.toUpperCase(),
+                          style: TextStyle(
+                              color: color, fontWeight: FontWeight.bold)),
+                    ),
                   ),
                 );
               },
@@ -1302,17 +1352,160 @@ class MyJourneyPage extends StatelessWidget {
   }
 }
 
+// --- NEW: GoalDetailsPage (for immutable view) ---
+class GoalDetailsPage extends StatelessWidget {
+  final Goal goal;
+  const GoalDetailsPage({super.key, required this.goal});
+
+  String _formatDuration(Duration duration) {
+    if (duration.inHours > 0) return "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
+    if (duration.inMinutes > 0) return "${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s";
+    return "${duration.inSeconds}s";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color lineColor = Theme.of(context).dividerColor;
+    
+    // Determine status color and icon
+    Color statusColor;
+    IconData statusIcon;
+    final String statusText = goal.status.name[0].toUpperCase() +
+        goal.status.name.substring(1);
+
+    switch (goal.status) {
+      case GoalStatus.active:
+        statusColor = Colors.amber.shade700;
+        statusIcon = Icons.flag_rounded;
+        break;
+      case GoalStatus.achieved:
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle_rounded;
+        break;
+      case GoalStatus.givenUp:
+        statusColor = Colors.red;
+        statusIcon = Icons.cancel_rounded;
+        break;
+    }
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(goal.title),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          // --- Goal Summary Card ---
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Goal Summary", style: Theme.of(context).textTheme.titleLarge),
+                  const Divider(height: 24),
+                  _DetailRow(
+                    icon: statusIcon, 
+                    iconColor: statusColor,
+                    title: "Status", 
+                    value: statusText,
+                  ),
+                  _DetailRow(
+                    icon: Icons.calendar_today_rounded, 
+                    title: "Created On", 
+                    value: DateFormat.yMMMd().format(goal.createdAt),
+                  ),
+                  _DetailRow(
+                    icon: Icons.timer_rounded, 
+                    title: "Total Time Spent", 
+                    value: _formatDuration(goal.totalTimeSpent),
+                  ),
+                   _DetailRow(
+                    icon: Icons.task_alt_rounded, 
+                    title: "Tasks Completed", 
+                    value: "${goal.completedTasks} / ${goal.totalTasks}",
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text("Milestones", style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+
+          // --- Immutable Milestone List ---
+          goal.milestones.isEmpty
+            ? const Center(child: Text("No milestones were added for this goal."))
+            : ListView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              shrinkWrap: true,
+              itemCount: goal.milestones.length,
+              itemBuilder: (context, index) {
+                final milestone = goal.milestones[index];
+                return MilestoneNode(
+                  key: ValueKey(milestone.id),
+                  milestone: milestone,
+                  isFirst: index == 0,
+                  isLast: index == goal.milestones.length - 1,
+                  // --- Pass dummy/empty functions to make it read-only ---
+                  onToggleCheckpoint: (m, c) {}, // Does nothing
+                  onDelete: () {}, // Does nothing
+                  editMode: false, // Disables delete button and toggle logic
+                  lineColor: lineColor,
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- NEW: Helper widget for GoalDetailsPage ---
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+  final Color? iconColor;
+  
+  const _DetailRow({
+    required this.icon, 
+    required this.title, 
+    required this.value,
+    this.iconColor
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor ?? Theme.of(context).colorScheme.primary, size: 20),
+          const SizedBox(width: 16),
+          Text(title, style: Theme.of(context).textTheme.titleSmall),
+          const Spacer(),
+          Text(value, style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+}
+
+
 // --- NotificationsSettingsPage (Unchanged) ---
 class NotificationsSettingsPage extends StatefulWidget {
   final Goal? activeGoal;
   const NotificationsSettingsPage({super.key, this.activeGoal});
 
   @override
-  _NotificationsSettingsPageState createState() =>
-      _NotificationsSettingsPageState();
+  // FIX: Made state class public to resolve private_type_in_public_api lint
+  NotificationsSettingsPageState createState() =>
+      NotificationsSettingsPageState();
 }
 
-class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
+// FIX: Made state class public
+class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   int _notificationCount = 1;
   List<TimeOfDay> _notificationTimes = [const TimeOfDay(hour: 9, minute: 0)];
   bool _isLoading = true;

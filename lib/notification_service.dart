@@ -1,3 +1,12 @@
+/*
+ * @author Mosses
+ * @version 1.1.0
+ * --- CHANGELOG ---
+ * v1.1.0:
+ * - [FIX] Moved notification stream to top-level to handle background/terminated taps.
+ * - [FIX] Added launch details check to NotificationService.
+ * - [FEAT] Added convenience getter `notificationSubject` for the top-level stream.
+ */
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -5,6 +14,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:timezone/timezone.dart' as tz;
 import './models.dart';
+import 'package:flutter/foundation.dart'; // Added for debugPrint
 
 // --- Action IDs for notifications ---
 const String doneActionId = 'DONE_ACTION';
@@ -27,6 +37,11 @@ class ReceivedNotification {
   final String? payload;
 }
 
+// --- TOP-LEVEL STREAM ---
+/// Moved outside the class to be accessible by the background handler.
+final BehaviorSubject<NotificationResponse> selectNotificationSubject =
+    BehaviorSubject<NotificationResponse>();
+
 // --- TOP-LEVEL FUNCTION FOR BACKGROUND HANDLING ---
 // This annotation is critical for background execution on Android.
 @pragma('vm:entry-point')
@@ -34,6 +49,9 @@ void notificationTapBackground(NotificationResponse notificationResponse) {
   // Handle your tap events here.
   debugPrint(
       'Notification tapped in background: ${notificationResponse.payload}');
+  
+  // --- FIX: Add the response to the top-level stream ---
+  selectNotificationSubject.add(notificationResponse);
 }
 
 class NotificationService {
@@ -51,8 +69,14 @@ class NotificationService {
       BehaviorSubject<ReceivedNotification>();
 
   // Stream for the UI to listen to notification responses
-  final BehaviorSubject<NotificationResponse> selectNotificationSubject =
-      BehaviorSubject<NotificationResponse>();
+  // --- DEPRECATED: This is now a top-level stream ---
+  // final BehaviorSubject<NotificationResponse> selectNotificationSubject =
+  //     BehaviorSubject<NotificationResponse>();
+
+  // --- FIX: Add a convenience getter for the UI ---
+  /// Provides access to the top-level notification response stream.
+  BehaviorSubject<NotificationResponse> get notificationSubject =>
+      selectNotificationSubject;
 
   Future<void> init() async {
     // --- Android Initialization ---
@@ -82,11 +106,20 @@ class NotificationService {
       initializationSettings,
       onDidReceiveNotificationResponse:
           (NotificationResponse notificationResponse) {
+        // --- FIX: Add to the top-level stream ---
         selectNotificationSubject.add(notificationResponse);
       },
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
     debugPrint("Notification Service Initialized.");
+  }
+
+  // --- FIX: Add method to get launch details ---
+  /// Checks if the app was launched from a notification.
+  /// This is needed in main.dart's initState.
+  Future<NotificationAppLaunchDetails?> getNotificationAppLaunchDetails() async {
+    return await _flutterLocalNotificationsPlugin
+        .getNotificationAppLaunchDetails();
   }
 
   // --- Method to schedule a recurring reminder ---
@@ -199,7 +232,7 @@ class NotificationService {
     await _flutterLocalNotificationsPlugin.show(
       99, // Unique ID for focus notification
       'Focusing on: $milestoneTitle',
-      'Your session is in progress...',
+      'Your session is in progress......',
       platformChannelSpecifics,
       payload: payload, // --- NEW: Add payload to handle tap
     );
@@ -231,6 +264,8 @@ class NotificationService {
   // --- Dispose streams ---
   void dispose() {
     _didReceiveLocalNotificationSubject.close();
-    selectNotificationSubject.close();
+    // --- FIX: Do not close the top-level stream here. ---
+    // It's shared across the app lifecycle.
+    // selectNotificationSubject.close();
   }
 }
