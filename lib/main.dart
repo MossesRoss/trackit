@@ -1,22 +1,20 @@
 /*
  * @author Mosses
- * @version 1.2.2
+ * @version 1.3.0
  * --- CHANGELOG ---
+ * v1.3.0:
+ * - [FIX] Added one-time migration logic to main() to clear the old,
+ * non-user-specific 'all_goals_cache' from SharedPreferences.
  * v1.2.2:
  * - [FIX] Registered a check for app launch via notification in initState.
- * - [FIX] Updated notification listener to use the new top-level stream 
+ * - [FIX] Updated notification listener to use the new top-level stream
  * from NotificationService to correctly handle background/terminated taps.
  * v1.2.1:
- * - [FIX] Removed unnecessary null check in _configureSelectNotificationSubject 
+ * - [FIX] Removed unnecessary null check in _configureSelectNotificationSubject
  * as identified by the analyzer, thanks to flow analysis.
  * v1.2.0:
  * - [FEAT] Implemented theme persistence using SharedPreferences.
  * - [DEBUG] Added debug logging to _configureSelectNotificationSubject to confirm action ID matching.
- * v1.1.1:
- * - [DEBUG] Added temporary cache clearing option `_clearCacheOnStartup` in 
- * `_loadGoalsAndRecover`. Set to true for one run to force Firestore fetch.
- * - [DEBUG] Added more logging around AuthWrapper and MainPage initState.
- * v1.1.0: Implemented timer recovery logic on app startup.
  */
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
@@ -42,13 +40,14 @@ import './notification_service.dart';
 // --- Keys for SharedPreferences Timer Recovery ---
 const String kRecoveryTimeKey = 'recovery_time_seconds';
 const String kRecoveryMilestoneKey = 'recovery_milestone_id';
-// --- Key for Firestore Local Cache ---
-const String _localCacheKey = 'all_goals_cache'; // Define it here too
+// --- Key for Firestore Local Cache (Old key, now only used for migration) ---
+const String _oldLocalCacheKey = 'all_goals_cache';
 // --- Key for Theme Persistence ---
 const String _kThemePersistenceKey = 'theme_mode';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// --- ThemeProvider (Unchanged) ---
 class ThemeProvider with ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.light;
   ThemeMode get themeMode => _themeMode;
@@ -93,6 +92,18 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // --- FIX: Add one-time migration to clear the old, non-user-specific cache ---
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.containsKey(_oldLocalCacheKey)) {
+      await prefs.remove(_oldLocalCacheKey);
+      debugPrint("MIGRATION: Removed old, non-user-specific goals cache.");
+    }
+  } catch (e) {
+    debugPrint("Error during one-time cache migration: $e");
+  }
+  // --- End of fix ---
 
   await NotificationService().init();
 
@@ -169,7 +180,8 @@ class MilestoneApp extends StatelessWidget {
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.black87,
       ),
-      cardTheme: CardThemeData( // FIX: Was CardTheme
+      cardTheme: CardThemeData(
+        // FIX: Was CardTheme
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -181,7 +193,8 @@ class MilestoneApp extends StatelessWidget {
       useMaterial3: true,
       brightness: Brightness.dark,
       colorSchemeSeed: Colors.indigo,
-      cardTheme: CardThemeData( // FIX: Was CardTheme
+      cardTheme: CardThemeData(
+        // FIX: Was CardTheme
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -202,6 +215,7 @@ class MilestoneApp extends StatelessWidget {
   }
 }
 
+// --- AuthWrapper (Unchanged) ---
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -239,6 +253,9 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
+// --- MainPage (Unchanged) ---
+// (No changes were required in MainPage itself, as the fixes are
+// in main() and services.dart)
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -358,7 +375,7 @@ class _MainPageState extends State<MainPage> {
           // --- FIX: Removed unnecessary null check ---
           // The analyzer knows `status` is non-null here because
           // the `default` case above returns.
-          
+
           // --- NEW DEBUG LOG ---
           debugPrint(
               "Matched action '${response.actionId}' to status '$status'. Proceeding to record.");
@@ -366,7 +383,6 @@ class _MainPageState extends State<MainPage> {
             toggleCheckpointByIds(goalId, milestoneId, checkpointId);
           }
           recordTaskCheckin(goalId, milestoneId, checkpointId, status);
-
         } catch (e) {
           debugPrint("Error processing notification payload: $e");
           debugPrint("Payload content: ${response.payload}");
@@ -393,15 +409,19 @@ class _MainPageState extends State<MainPage> {
     if (_clearCacheOnStartup) {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.remove(_localCacheKey);
-        debugPrint(
-            "DEBUG: Force cleared local goals cache ('$_localCacheKey').");
+        // --- FIX: Must use the *user-specific* key to clear it ---
+        if (persistenceService.uid != null) {
+          final userCacheKey = 'all_goals_cache_${persistenceService.uid}';
+          await prefs.remove(userCacheKey);
+          debugPrint(
+              "DEBUG: Force cleared local goals cache ('$userCacheKey').");
+        }
       } catch (e) {
         debugPrint("DEBUG: Error clearing cache: $e");
       }
     }
 
-    // 1. Load goals from persistence (will now use enhanced logging)
+    // 1. Load goals from persistence (will now use user-specific key)
     final goals = await persistenceService.loadGoals();
     if (!mounted) {
       debugPrint(

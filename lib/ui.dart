@@ -1,3 +1,13 @@
+/*
+ * @author Mosses
+ * @version 1.3.0
+ * --- CHANGELOG ---
+ * v1.3.0:
+ * - [FEAT] Replaced Upgrade to Pro dialog with a dedicated page (UpgradePage).
+ * - [CLEANUP] Removed unused _showUpgradeDialog and _BenefitTile widgets.
+ * v1.2.1: (Previous changes)
+ * - ...
+ */
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -12,6 +22,7 @@ import './services.dart';
 import './reports_page.dart';
 import './notification_service.dart';
 import './guide_page.dart';
+import './upgrade_page.dart'; // --- MOD: Import the new upgrade page ---
 
 // --- Keys for SharedPreferences Timer Recovery ---
 const String kRecoveryTimeKey = 'recovery_time_seconds';
@@ -163,7 +174,7 @@ class _HomePageState extends State<HomePage> {
                                     .bodyMedium
                                     ?.color
                                     // FIX: Replaced deprecated .withOpacity with .withAlpha
-                                    ?.withAlpha((255 * 0.8).round())), 
+                                    ?.withAlpha((255 * 0.8).round())),
                           ),
                     const Spacer(),
                   ],
@@ -473,7 +484,7 @@ class MilestonesPageState extends State<MilestonesPage> {
   }
 }
 
-// --- SettingsPage (Unchanged) ---
+// --- SettingsPage (MODIFIED) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -497,83 +508,8 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  // --- NEW: Show Upgrade Dialog ---
-  void _showUpgradeDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16.0),
-          ),
-          title: const Row(
-            children: [
-              Icon(Icons.auto_awesome_rounded),
-              SizedBox(width: 8),
-              Text("Upgrade to Pro"),
-            ],
-          ),
-          content: const SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Unlock your full potential and achieve your goals 81% more effectively!",
-                  style: TextStyle(fontSize: 16),
-                ),
-                SizedBox(height: 24),
-                _BenefitTile(
-                  icon: Icons.palette_rounded,
-                  title: "Full App Customization",
-                  subtitle:
-                      "Request any feature or layout change, just for you.",
-                ),
-                _BenefitTile(
-                  icon: Icons.auto_awesome_rounded,
-                  title: "Powerful AI Features",
-                  subtitle:
-                      "Get AI-powered suggestions, planning, and insights everywhere.",
-                ),
-                _BenefitTile(
-                  icon: Icons.bar_chart_rounded,
-                  title: "Advanced Data Visualization",
-                  subtitle:
-                      "See beautiful charts of your progress, habits, and projections.",
-                ),
-                _BenefitTile(
-                  icon: Icons.schedule_rounded,
-                  title: "AI-Powered Goal Scheduling",
-                  subtitle:
-                      "Let AI analyze your goals and build the perfect milestone plan.",
-                ),
-                _BenefitTile(
-                  icon: Icons.support_agent_rounded,
-                  title: "Priority Support",
-                  subtitle: "Get your questions and requests handled first.",
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Maybe Later"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                // Redirect to the same UPI screenshot
-                _launchURL(
-                    "https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing");
-                Navigator.of(context).pop();
-              },
-              child: const Text("Upgrade Now"),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  // --- MOD: Removed _showUpgradeDialog ---
+  // --- MOD: Removed _BenefitTile helper widget ---
 
   @override
   Widget build(BuildContext context) {
@@ -591,7 +527,7 @@ class SettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
-          // --- NEW: Upgrade to Pro Tile ---
+          // --- MOD: "Upgrade to Pro" Tile ---
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: Theme.of(context).colorScheme.primaryContainer,
@@ -616,7 +552,12 @@ class SettingsPage extends StatelessWidget {
                       .withOpacity(0.8),
                 ),
               ),
-              onTap: () => _showUpgradeDialog(context),
+              // --- MOD: Changed onTap to navigate to the new page ---
+              onTap: () {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const UpgradePage(),
+                ));
+              },
             ),
           ),
           SwitchListTile(
@@ -678,26 +619,6 @@ class SettingsPage extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-// --- NEW: Helper widget for the Upgrade Dialog ---
-class _BenefitTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  const _BenefitTile(
-      {required this.icon, required this.title, required this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text(subtitle),
     );
   }
 }

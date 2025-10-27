@@ -1,14 +1,19 @@
 /*
  * @author Mosses
- * @version 1.2.0
+ * @version 1.3.0
  * --- CHANGELOG ---
+ * v1.3.0:
+ * - [FIX] Namespaced SharedPreferences cache key with user UID to prevent
+ * data leaking between accounts on login/logout.
+ * - [FEAT] Added logic to AuthService.signOut() to clear the current user's
+ * namespaced cache and timer recovery keys upon logout.
  * v1.2.0:
- * - [PERF] Refactored all report getters (getWeeklyReport, etc.) to use Streams 
+ * - [PERF] Refactored all report getters (getWeeklyReport, etc.) to use Streams
  * instead of Futures. This enables real-time data updates on the reports page.
- * - [PERF] Added `compute` function and a top-level `_processPeriodData` helper 
- * to move all heavy report calculations to a background isolate. 
+ * - [PERF] Added `compute` function and a top-level `_processPeriodData` helper
+ * to move all heavy report calculations to a background isolate.
  * This fixes the UI lag/freeze on the reports page.
- * - [FIX] Report logic now correctly counts tasks completed *within* a period 
+ * - [FIX] Report logic now correctly counts tasks completed *within* a period
  * by summing 'Done' check-ins, instead of just total completed tasks.
  * - [FEAT] Added `getGoalsStream` to provide a real-time stream of all user goals.
  */
@@ -29,9 +34,8 @@ import './notification_service.dart'; // Import the new service
 
 // =======================================================================
 // TOP-LEVEL FUNCTION FOR BACKGROUND REPORT PROCESSING
+// (This function is unchanged)
 // =======================================================================
-/// This function runs in a separate isolate via `compute` to prevent UI lag.
-/// It MUST be a top-level function (not inside a class).
 Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
   // Deserialize goals from JSON
   final List<Goal> allGoals = (params['goals'] as List<dynamic>)
@@ -49,8 +53,6 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
   for (final goal in allGoals) {
     for (final milestone in goal.milestones) {
       // User's original logic for time.
-      // Note: This is flawed as it adds *total* time if worked on in period.
-      // A better long-term fix is to log time with each check-in.
       if (milestone.lastWorkedOn != null &&
           milestone.lastWorkedOn!.isAfter(start) &&
           milestone.lastWorkedOn!.isBefore(end)) {
@@ -58,7 +60,6 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
       }
 
       // --- FIX: Logic is now correct ---
-      // We iterate check-ins to find tasks completed *in this period*.
       for (final checkin in milestone.checkins) {
         if (checkin.timestamp.isAfter(start) &&
             checkin.timestamp.isBefore(end)) {
@@ -82,7 +83,7 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
   };
 }
 
-// --- Auth Service (unchanged) ---
+// --- Auth Service (Updated) ---
 class AuthService with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
@@ -135,18 +136,46 @@ class AuthService with ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    // --- FIX: Clear cache for the current user *before* signing out ---
+    try {
+      final currentUserUid = _auth.currentUser?.uid;
+      if (currentUserUid != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final userCacheKey = 'all_goals_cache_$currentUserUid';
+        await prefs.remove(userCacheKey);
+        debugPrint("Cleared cache for user $currentUserUid");
+
+        // --- FIX: Also clear timer recovery keys ---
+        // (Keys are from main.dart)
+        await prefs.remove('recovery_time_seconds');
+        await prefs.remove('recovery_milestone_id');
+        debugPrint("Cleared timer recovery keys.");
+      }
+    } catch (e) {
+      debugPrint("Error clearing user cache on sign-out: $e");
+    }
+    // --- End of fix ---
+
     await _googleSignIn.signOut();
     await _auth.signOut();
   }
 }
 
-// --- Firestore Service (Updated) ---
+// --- FIX: Add the missing FirestoreService class back in ---
 class FirestoreService {
   final String? uid;
   FirestoreService(this.uid);
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  static const _localCacheKey = 'all_goals_cache';
+  // --- FIX: Remove static cache key ---
+  // static const _localCacheKey = 'all_goals_cache';
+
+  // --- FIX: Create a user-specific getter for the cache key ---
+  String get _userCacheKey {
+    // If uid is null, return a key that will never be found/set.
+    if (uid == null) return 'all_goals_cache_anonymous';
+    return 'all_goals_cache_$uid';
+  }
 
   Future<void> archiveGoal(Goal goal) async {
     if (uid == null) return;
@@ -180,21 +209,30 @@ class FirestoreService {
 
   /// Helper to update the SharedPreferences cache
   Future<void> _cacheGoals(List<Goal> goals) async {
+    // --- FIX: Don't cache if UID is null (e.g., logged out) ---
+    if (uid == null) return;
     final prefs = await SharedPreferences.getInstance();
     final String goalsJson =
         json.encode(goals.map((g) => g.toJson()).toList());
-    await prefs.setString(_localCacheKey, goalsJson);
+    // --- FIX: Use user-specific cache key ---
+    await prefs.setString(_userCacheKey, goalsJson);
   }
 
   Future<List<Goal>> loadGoals() async {
+    // --- FIX: If no user, return empty list immediately ---
+    if (uid == null) return [];
+
     final prefs = await SharedPreferences.getInstance();
-    final String? localGoalsJson = prefs.getString(_localCacheKey);
+    // --- FIX: Use user-specific cache key ---
+    final String? localGoalsJson = prefs.getString(_userCacheKey);
+
     if (localGoalsJson != null) {
       final List<dynamic> decodedJson = json.decode(localGoalsJson);
       return decodedJson.map((g) => Goal.fromJson(g)).toList();
     }
 
-    if (uid == null) return [];
+    // No local cache found for this user, fetch from Firestore
+    // (uid is guaranteed to be non-null here)
     final goalsCollection = _db.collection('users').doc(uid).collection('goals');
     final snapshot = await goalsCollection.get();
     final goals =
@@ -221,7 +259,7 @@ class FirestoreService {
       debugPrint("getGoalsStream: Received new goals snapshot.");
       final goals =
           snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
-      // Update cache in the background
+      // Update cache in the background (will now use user-specific key)
       _cacheGoals(goals);
       return goals;
     });
@@ -353,16 +391,18 @@ class FirestoreService {
     });
   }
 }
+// --- End of fix ---
 
-// --- Helper class for Suggestion Service results ---
+// --- FIX: Add this missing class ---
 class SuggestionResult {
   final String? suggestion;
   final String? error; // e.g., "NO_API_KEY", "API_ERROR", "NETWORK_ERROR"
 
   SuggestionResult({this.suggestion, this.error});
 }
+// --- End of fix ---
 
-// --- Suggestion Service (Completely Updated) ---
+// --- Suggestion Service (Unchanged) ---
 class SuggestionService {
   // =======================================================================
   // CRITICAL ACTION: Paste your Google Apps Script Web App URL here.
