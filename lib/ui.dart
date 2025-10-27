@@ -1,12 +1,16 @@
 /*
  * @author Mosses
- * @version 1.3.0
+ * @version 1.3.2
  * --- CHANGELOG ---
+ * v1.3.2:
+ * - [FEAT] Updated GoalTimerCircle to use RichText for the total time display,
+ * reducing the opacity of the 'h' and 'm' characters as requested.
+ * v1.3.1:
+ * - [FIX] Updated time formatting on HomePage timer circle to be accurate.
+ * - [CLEANUP] Replaced inaccurate _formatTotalHours with the more precise _formatDuration logic (from GoalDetailsPage).
  * v1.3.0:
  * - [FEAT] Replaced Upgrade to Pro dialog with a dedicated page (UpgradePage).
  * - [CLEANUP] Removed unused _showUpgradeDialog and _BenefitTile widgets.
- * v1.2.1: (Previous changes)
- * - ...
  */
 import 'dart:async';
 import 'dart:convert';
@@ -319,14 +323,19 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     }
   }
 
-  String _formatTotalHours(Duration duration) {
+  // --- FIX: This function is now accurate (from v1.3.1) ---
+  String _formatTotalTime(Duration duration) {
     if (duration.inHours > 0) {
-      return "${duration.inHours} Hours";
+      return "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
     }
     if (duration.inMinutes > 0) {
-      return "${duration.inMinutes} Mins";
+      return "${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s";
     }
-    return "${duration.inSeconds} Secs";
+    if (duration.inSeconds > 0) {
+      return "${duration.inSeconds}s";
+    }
+    // Default for 0
+    return "0m 0s";
   }
 
   String _formatRunningTime(int totalSeconds) {
@@ -341,6 +350,47 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
   @override
   Widget build(BuildContext context) {
     final Color primaryColor = Theme.of(context).colorScheme.primary;
+    
+    // --- FEAT: Build RichText for total time display ---
+    final String totalTimeText = _formatTotalTime(widget.goal.totalTimeSpent);
+    final double fontSize = totalTimeText.length > 8 ? 30 : 36; // Adjusted size
+    
+    final TextStyle numberStyle = TextStyle(
+      fontSize: fontSize,
+      fontWeight: FontWeight.bold,
+      color: primaryColor,
+    );
+    // Style for 'h', 'm', 's' with reduced opacity
+    final TextStyle unitStyle = TextStyle(
+      fontSize: fontSize,
+      fontWeight: FontWeight.bold,
+      color: primaryColor.withOpacity(0.6), // <-- Reduced opacity
+    );
+
+    final List<TextSpan> spans = [];
+    final RegExp simpleRegex = RegExp(r'(\d+)([hms])');
+    final parts = totalTimeText.split(' '); // e.g., ["4h", "47m"] or ["0m", "0s"]
+
+    for (int i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      final match = simpleRegex.firstMatch(part); // Match "4h", "47m", etc.
+
+      if (match != null) {
+        // Add number (e.g., "4")
+        spans.add(TextSpan(text: match.group(1), style: numberStyle));
+        // Add unit (e.g., "h")
+        spans.add(TextSpan(text: match.group(2), style: unitStyle));
+        // Add space if not the last part
+        if (i < parts.length - 1) {
+          spans.add(TextSpan(text: ' ', style: numberStyle));
+        }
+      } else {
+        // Fallback just in case
+        spans.add(TextSpan(text: part, style: numberStyle));
+      }
+    }
+    // --- End of RichText build ---
+
 
     return GestureDetector(
       onLongPress: _onLongPress,
@@ -386,12 +436,10 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
                 ),
               ),
               // Show total hours text if _showTimer is false
-              secondChild: Text(
-                _formatTotalHours(widget.goal.totalTimeSpent),
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: primaryColor,
+              secondChild: RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                  children: spans,
                 ),
               ),
               crossFadeState: _showTimer
@@ -1545,23 +1593,23 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
                 if (!_hasExactAlarmPermission)
                   Card(
                     color: Colors.red.shade100,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
+                    child: const Padding(
+                      padding: EdgeInsets.all(12.0),
                       child: Column(
                         children: [
-                          const Text("Permission Required",
+                          Text("Permission Required",
                               style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: Colors.red)),
-                          const SizedBox(height: 8),
-                          const Text(
+                          SizedBox(height: 8),
+                          Text(
                             "This app needs permission to schedule exact alarms for notifications to work correctly. Please grant this permission in your phone's settings.",
                             textAlign: TextAlign.center,
                           ),
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8),
                           TextButton(
                               onPressed: openAppSettings,
-                              child: const Text("Open Settings"))
+                              child: Text("Open Settings"))
                         ],
                       ),
                     ),

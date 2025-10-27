@@ -1,7 +1,10 @@
 /*
  * @author Mosses
- * @version 1.3.0
+ * @version 1.3.2
  * --- CHANGELOG ---
+ * v1.3.2:
+ * - [FIX] Changed Provider.of<ThemeProvider> in MainPage.build to listen (removed listen: false) 
+ * to ensure the settings page UI updates instantly when the theme is toggled.
  * v1.3.0:
  * - [FIX] Added one-time migration logic to main() to clear the old,
  * non-user-specific 'all_goals_cache' from SharedPreferences.
@@ -9,12 +12,6 @@
  * - [FIX] Registered a check for app launch via notification in initState.
  * - [FIX] Updated notification listener to use the new top-level stream
  * from NotificationService to correctly handle background/terminated taps.
- * v1.2.1:
- * - [FIX] Removed unnecessary null check in _configureSelectNotificationSubject
- * as identified by the analyzer, thanks to flow analysis.
- * v1.2.0:
- * - [FEAT] Implemented theme persistence using SharedPreferences.
- * - [DEBUG] Added debug logging to _configureSelectNotificationSubject to confirm action ID matching.
  */
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
@@ -799,7 +796,7 @@ class _MainPageState extends State<MainPage> {
     }
   }
 
-  // --- build (Unchanged) ---
+  // --- build (CHANGED) ---
   @override
   Widget build(BuildContext context) {
     // --- DEBUG ---
@@ -815,7 +812,8 @@ class _MainPageState extends State<MainPage> {
       );
     }
 
-    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    // --- FIX: Set listen: true (default) to update SettingsPage switch ---
+    final themeProvider = Provider.of<ThemeProvider>(context);
 
     // --- DEBUG ---
     debugPrint(
