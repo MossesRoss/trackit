@@ -1,7 +1,12 @@
 /*
  * @author Mosses
- * @version 1.2.0
+ * @version 1.3.0
  * --- CHANGELOG ---
+ * v1.3.0:
+ * - [PERF] Stored report streams in `initState` to prevent them from
+ * being rebuilt, fixing the real-time update bug.
+ * - [STYLE] Removed redundant "Overall Goal Progress" title from the 'Overall' tab.
+ * - [STYLE] Moved the pie chart in the 'Overall' tab to the top of the screen.
  * v1.2.0:
  * - [PERF] Replaced all `FutureBuilder` widgets with `StreamBuilder` widgets.
  * - [FIX] Connected report views to the new real-time streams from 
@@ -85,11 +90,25 @@ class _ReportsPageState extends State<ReportsPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
+  // --- FIX: Define streams as state variables ---
+  late Stream<Map<String, dynamic>> _weeklyReportStream;
+  late Stream<Map<String, dynamic>> _monthlyReportStream;
+  late Stream<Map<String, dynamic>> _yearlyReportStream;
+
   @override
   void initState() {
     super.initState();
     // --- FIX: Add new tab ---
     _tabController = TabController(length: 4, vsync: this);
+
+    // --- FIX: Get service and initialize streams ONCE ---
+    // We use listen: false because this should only run once
+    // and not cause initState to re-run if the provider changes.
+    final firestoreService =
+        Provider.of<FirestoreService>(context, listen: false);
+    _weeklyReportStream = firestoreService.getWeeklyReport();
+    _monthlyReportStream = firestoreService.getMonthlyReport();
+    _yearlyReportStream = firestoreService.getYearlyReport();
   }
 
   @override
@@ -100,7 +119,8 @@ class _ReportsPageState extends State<ReportsPage>
 
   @override
   Widget build(BuildContext context) {
-    final firestoreService = Provider.of<FirestoreService>(context);
+    // This call is no longer needed here:
+    // final firestoreService = Provider.of<FirestoreService>(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -122,18 +142,18 @@ class _ReportsPageState extends State<ReportsPage>
           // --- FIX: Add new 'Overall' view ---
           OverallReportView(activeGoal: widget.activeGoal),
 
-          // --- FIX: Pass the new streams to ReportView ---
+          // --- FIX: Pass the persistent streams from state ---
           ReportView(
             title: 'Weekly Report',
-            reportStream: firestoreService.getWeeklyReport(),
+            reportStream: _weeklyReportStream,
           ),
           ReportView(
             title: 'Monthly Report',
-            reportStream: firestoreService.getMonthlyReport(),
+            reportStream: _monthlyReportStream,
           ),
           ReportView(
             title: 'Yearly Report',
-            reportStream: firestoreService.getYearlyReport(),
+            reportStream: _yearlyReportStream,
             isYearly: true,
           ),
         ],
@@ -162,20 +182,25 @@ class OverallReportView extends StatelessWidget {
     }
 
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text(
-            "Overall Goal Progress",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          // --- STYLE: Add spacing ---
-          const SizedBox(height: 24),
-          ProgressPieChart(
-            completed: activeGoal!.completedTasks,
-            total: activeGoal!.totalTasks,
-          ),
-        ],
+      // --- STYLE: Add padding and change alignment ---
+      child: Padding(
+        padding: const EdgeInsets.only(top: 32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.start, // <-- FIX
+          children: [
+            // --- STYLE: Remove redundant title ---
+            // const Text(
+            //   "Overall Goal Progress",
+            //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            // ),
+            // --- STYLE: Remove extra space ---
+            // const SizedBox(height: 24),
+            ProgressPieChart(
+              completed: activeGoal!.completedTasks,
+              total: activeGoal!.totalTasks,
+            ),
+          ],
+        ),
       ),
     );
   }

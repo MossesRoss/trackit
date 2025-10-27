@@ -1,3 +1,17 @@
+/*
+ * @author Mosses
+ * @version 1.4.0
+ * --- CHANGELOG ---
+ * v1.4.0:
+ * - [FEAT] Added `TimeSession` class to log individual work sessions
+ * with timestamps, enabling accurate period-based reporting.
+ * - [FEAT] Added `timeLog` (a List<TimeSession>) to the `Milestone` model.
+ * - [FIX] `Milestone.timeSpent` and `Milestone.lastWorkedOn` are now getters
+ * that compute their values from the `timeLog`.
+ * - [FIX] `Milestone.fromJson` now intelligently migrates old `timeSpent`
+ * data into the new `timeLog` model, ensuring backward compatibility.
+ * - [FIX] `Milestone.toJson` now saves the new `timeLog`.
+ */
 import 'package:flutter/material.dart';
 
 // --- NEW: Enum for the status of a task check-in ---
@@ -25,6 +39,27 @@ class TaskCheckin {
         checkpointId: json['checkpointId'],
         status: TaskCheckinStatus.values[json['status']],
         timestamp: DateTime.parse(json['timestamp']),
+      );
+}
+
+// --- NEW: Represents a single timed work session ---
+class TimeSession {
+  final DateTime timestamp;
+  final Duration duration;
+
+  TimeSession({
+    required this.timestamp,
+    required this.duration,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'timestamp': timestamp.toIso8601String(),
+        'durationInSeconds': duration.inSeconds,
+      };
+
+  factory TimeSession.fromJson(Map<String, dynamic> json) => TimeSession(
+        timestamp: DateTime.parse(json['timestamp']),
+        duration: Duration(seconds: json['durationInSeconds']),
       );
 }
 
@@ -70,7 +105,7 @@ class Goal {
   int get totalTasks => milestones.fold(0, (sum, m) => sum + m.checkpoints.length);
   int get completedTasks => milestones.fold(0, (sum, m) => sum + m.completedCheckpointIds.length);
 
-  // --- NEW: Getter for total time spent on the goal ---
+  // --- FIX: totalTimeSpent now computes from the new milestone log ---
   Duration get totalTimeSpent =>
       milestones.fold(Duration.zero, (sum, m) => sum + m.timeSpent);
 
@@ -107,8 +142,10 @@ class Milestone {
   List<Checkpoint> checkpoints;
   List<String> completedCheckpointIds;
   bool isUnlocked;
-  Duration timeSpent;
-  DateTime? lastWorkedOn;
+  // --- FIX: timeSpent and lastWorkedOn are replaced by timeLog ---
+  // Duration timeSpent;
+  // DateTime? lastWorkedOn;
+  List<TimeSession> timeLog;
   // --- NEW: List to store task check-in records ---
   List<TaskCheckin> checkins;
 
@@ -118,13 +155,23 @@ class Milestone {
     required this.checkpoints,
     List<String> completedCheckpointIds = const [],
     this.isUnlocked = false,
-    this.timeSpent = Duration.zero,
-    this.lastWorkedOn,
+    // --- FIX: Remove timeSpent and lastWorkedOn from constructor ---
+    // this.timeSpent = Duration.zero,
+    // this.lastWorkedOn,
     String? id,
     List<TaskCheckin> checkins = const [], // Initialize with empty list
+    List<TimeSession> timeLog = const [], // --- FIX: Add timeLog ---
   })  : id = id ?? UniqueKey().toString(),
         completedCheckpointIds = List<String>.from(completedCheckpointIds),
-        checkins = List<TaskCheckin>.from(checkins);
+        checkins = List<TaskCheckin>.from(checkins),
+        timeLog = List<TimeSession>.from(timeLog); // --- FIX: Add timeLog ---
+
+  // --- FIX: timeSpent is now a getter that sums the log ---
+  Duration get timeSpent =>
+      timeLog.fold(Duration.zero, (prev, session) => prev + session.duration);
+
+  // --- FIX: lastWorkedOn is now a getter that checks the log ---
+  DateTime? get lastWorkedOn => timeLog.isEmpty ? null : timeLog.last.timestamp;
 
   double get progress => checkpoints.isEmpty
       ? 0.0
@@ -137,12 +184,31 @@ class Milestone {
         'deadline': deadline.toIso8601String(),
         'checkpoints': checkpoints.map((c) => c.toJson()).toList(),
         'completedCheckpointIds': completedCheckpointIds,
-        'timeSpent': timeSpent.inSeconds,
-        'lastWorkedOn': lastWorkedOn?.toIso8601String(),
+        // --- FIX: Save the new timeLog instead of old fields ---
+        // 'timeSpent': timeSpent.inSeconds,
+        // 'lastWorkedOn': lastWorkedOn?.toIso8601String(),
+        'timeLog': timeLog.map((s) => s.toJson()).toList(),
         'checkins': checkins.map((c) => c.toJson()).toList(),
       };
 
   factory Milestone.fromJson(Map<String, dynamic> json) {
+    // --- FIX: Add migration logic for old data model ---
+    List<TimeSession> log = [];
+    if (json['timeLog'] != null) {
+      // New data model exists, use it
+      log = List<TimeSession>.from(
+          (json['timeLog'] as List).map((s) => TimeSession.fromJson(s)));
+    } else if ((json['timeSpent'] ?? 0) > 0) {
+      // Old data model exists, migrate it to a single session
+      log.add(TimeSession(
+        timestamp: json['lastWorkedOn'] != null
+            ? DateTime.parse(json['lastWorkedOn'])
+            : DateTime.now(), // Fallback timestamp
+        duration: Duration(seconds: json['timeSpent'] ?? 0),
+      ));
+    }
+    // --- End of migration logic ---
+
     return Milestone(
       id: json['id'],
       title: json['title'],
@@ -151,10 +217,12 @@ class Milestone {
           (json['checkpoints'] as List).map((c) => Checkpoint.fromJson(c))),
       completedCheckpointIds:
           List<String>.from(json['completedCheckpointIds']),
-      timeSpent: Duration(seconds: json['timeSpent'] ?? 0),
-      lastWorkedOn: json['lastWorkedOn'] != null
-          ? DateTime.parse(json['lastWorkedOn'])
-          : null,
+      // --- FIX: Remove old fields from factory ---
+      // timeSpent: Duration(seconds: json['timeSpent'] ?? 0),
+      // lastWorkedOn: json['lastWorkedOn'] != null
+      //     ? DateTime.parse(json['lastWorkedOn'])
+      //     : null,
+      timeLog: log, // --- FIX: Assign the new log ---
       // Handle potentially null check-ins for backward compatibility
       checkins: json['checkins'] == null
           ? []
@@ -163,4 +231,3 @@ class Milestone {
     );
   }
 }
-

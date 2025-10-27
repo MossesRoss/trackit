@@ -1,7 +1,12 @@
 /*
  * @author Mosses
- * @version 1.3.2
+ * @version 1.4.0
  * --- CHANGELOG ---
+ * v1.4.0:
+ * - [FIX] Updated `_addTimeToMilestone` to add a new `TimeSession`
+ * to the `milestone.timeLog` list instead of incrementing the
+ * deprecated `timeSpent` field. This enables accurate, session-based
+ * time reporting.
  * v1.3.2:
  * - [FIX] Changed Provider.of<ThemeProvider> in MainPage.build to listen (removed listen: false) 
  * to ensure the settings page UI updates instantly when the theme is toggled.
@@ -707,7 +712,7 @@ class _MainPageState extends State<MainPage> {
     _saveGoals();
   }
 
-  // --- addTimeToMilestone (Minor Update from Recovery Logic) ---
+  // --- addTimeToMilestone (CHANGED) ---
   void _addTimeToMilestone(String milestoneId, Duration timeToAdd) {
     if (_activeGoal == null) {
       debugPrint("AddTimeToMilestone: Active goal is null. Cannot add time.");
@@ -731,10 +736,21 @@ class _MainPageState extends State<MainPage> {
         return; // Exit if milestone not found
       }
 
-      milestone.timeSpent += timeToAdd;
-      milestone.lastWorkedOn = DateTime.now(); // Update last worked on time
+      // --- FIX: This is the new, correct logic ---
+      // Add a new session to the time log
+      milestone.timeLog.add(TimeSession(
+        timestamp: DateTime.now(),
+        duration: timeToAdd,
+      ));
+      // --- End of new logic ---
+
+      // --- DEPRECATED: Remove old logic ---
+      // milestone.timeSpent += timeToAdd;
+      // milestone.lastWorkedOn = DateTime.now(); // Update last worked on time
+      // --- End of deprecated logic ---
+
       debugPrint(
-          "Milestone ${milestone.id} updated: timeSpent=${milestone.timeSpent}, lastWorkedOn=${milestone.lastWorkedOn}");
+          "Milestone ${milestone.id} updated: New session added. Total time is now ${milestone.timeSpent}, lastWorkedOn=${milestone.lastWorkedOn}");
     });
     // Save goals immediately after state change involving time
     _saveGoals();

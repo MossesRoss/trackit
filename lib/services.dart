@@ -1,7 +1,18 @@
 /*
  * @author Mosses
- * @version 1.3.0
+ * @version 1.4.0
  * --- CHANGELOG ---
+ * v1.4.0:
+ * - [FIX] Updated `_processPeriodData` background task to iterate
+ * through the new `milestone.timeLog` list. It now correctly
+ * sums *only* the session durations that fall within the
+ * report's date range, fixing the inaccurate time bug.
+ * - [FIX] Removed the old logic that checked `lastWorkedOn` and
+ * added the total `milestone.timeSpent`.
+ * - [FIX] Truncated `startOfWeek` in `getWeeklyReport` to 00:00:00
+ * to fix the bug where the weekly report showed "0" on Mondays.
+ * - [FIX] Adjusted `endOfWeek` to add 7 full days, making the
+ * `isBefore(end)` check correct for the whole week.
  * v1.3.0:
  * - [FIX] Namespaced SharedPreferences cache key with user UID to prevent
  * data leaking between accounts on login/logout.
@@ -52,12 +63,25 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
 
   for (final goal in allGoals) {
     for (final milestone in goal.milestones) {
-      // User's original logic for time.
-      if (milestone.lastWorkedOn != null &&
-          milestone.lastWorkedOn!.isAfter(start) &&
-          milestone.lastWorkedOn!.isBefore(end)) {
-        totalTime += milestone.timeSpent;
+      // --- FIX: This is the new, correct logic ---
+      // Iterate over every individual time session
+      for (final session in milestone.timeLog) {
+        // Check if the session *timestamp* is within the period
+        if (session.timestamp.isAfter(start) &&
+            session.timestamp.isBefore(end)) {
+          // Add only *that session's* duration
+          totalTime += session.duration;
+        }
       }
+      // --- End of new logic ---
+
+      // --- DEPRECATED: Remove old, buggy logic ---
+      // if (milestone.lastWorkedOn != null &&
+      //     milestone.lastWorkedOn!.isAfter(start) &&
+      //     milestone.lastWorkedOn!.isBefore(end)) {
+      //   totalTime += milestone.timeSpent;
+      // }
+      // --- End of deprecated logic ---
 
       // --- FIX: Logic is now correct ---
       for (final checkin in milestone.checkins) {
@@ -273,8 +297,11 @@ class FirestoreService {
     return getGoalsStream().asyncMap((goals) async {
       debugPrint("getWeeklyReport: Processing ${goals.length} goals...");
       final now = DateTime.now();
-      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-      final endOfWeek = startOfWeek.add(const Duration(days: 6));
+      // --- FIX: Truncate `now` to 00:00:00 to get true start of week ---
+      final startOfWeek = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: now.weekday - 1));
+      // --- FIX: Add 7 full days so `isBefore` works correctly ---
+      final endOfWeek = startOfWeek.add(const Duration(days: 7));
       final startOfLastWeek = startOfWeek.subtract(const Duration(days: 7));
 
       // Prepare data for background processing
@@ -408,7 +435,7 @@ class SuggestionService {
   // CRITICAL ACTION: Paste your Google Apps Script Web App URL here.
   // =======================================================================
   static const String _appsScriptUrl =
-      "https://script.google.com/macros/s/AKfycbyNDtjg-zyL4OZJlLacYhDuh0vpWFQsuqyMFWuMiLXyA15qMBtz0Fq3ZelpNkZiJMDN/exec";
+      "httpsGive_Me_A_Link";
   // =======================================================================
 
   /// Calls the Google Apps Script backend proxy.
