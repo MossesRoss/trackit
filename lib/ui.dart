@@ -363,8 +363,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     // Style for 'h', 'm', 's' with reduced opacity
     final TextStyle unitStyle = TextStyle(
       fontSize: fontSize,
-      fontWeight: FontWeight.bold,
-      color: primaryColor.withOpacity(0.6), // <-- Reduced opacity
+      fontWeight: FontWeight.normal,
+      color: primaryColor.withOpacity(0.5), // <-- Reduced opacity
     );
 
     final List<TextSpan> spans = [];
@@ -548,16 +548,13 @@ class SettingsPage extends StatelessWidget {
       required this.onEditModeChanged,
       required this.allGoals});
 
-  // --- _launchURL method (unchanged) ---
-  Future<void> _launchURL(String urlString) async {
-    final Uri url = Uri.parse(urlString);
-    if (!await launchUrl(url)) {
-      throw Exception('Could not launch $url');
-    }
-  }
-
-  // --- MOD: Removed _showUpgradeDialog ---
-  // --- MOD: Removed _BenefitTile helper widget ---
+  // // --- _launchURL method (unchanged) ---
+  // Future<void> _launchURL(String urlString) async {
+  //   final Uri url = Uri.parse(urlString);
+  //   if (!await launchUrl(url)) {
+  //     throw Exception('Could not launch $url');
+  //   }
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -647,7 +644,7 @@ class SettingsPage extends StatelessWidget {
               }),
           ListTile(
             leading: const Icon(Icons.help_outline_rounded),
-            title: const Text("How to Use (Guide)"),
+            title: const Text("Help"),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const GuidePage())),
           ),

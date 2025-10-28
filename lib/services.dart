@@ -1,7 +1,16 @@
 /*
  * @author Mosses
- * @version 1.4.0
+ * @version 1.4.1
  * --- CHANGELOG ---
+ * v1.4.1:
+ * - [FIX] Modified `archiveGoal` to save to a user-specific subcollection
+ * (`users/{uid}/archived_goals`) instead of a root collection, to
+ * respect Firestore security rules.
+ * - [FIX] Updated `getYearlyReport` to query the new
+ * `users/{uid}/archived_goals` subcollection, fixing the
+ * [cloud_firestore/permission-denied] error.
+ * - [PERF] Removed redundant `where('userId', ...)` query from `getYearlyReport`
+ * as it's now implied by the collection path.
  * v1.4.0:
  * - [FIX] Updated `_processPeriodData` background task to iterate
  * through the new `milestone.timeLog` list. It now correctly
@@ -13,20 +22,6 @@
  * to fix the bug where the weekly report showed "0" on Mondays.
  * - [FIX] Adjusted `endOfWeek` to add 7 full days, making the
  * `isBefore(end)` check correct for the whole week.
- * v1.3.0:
- * - [FIX] Namespaced SharedPreferences cache key with user UID to prevent
- * data leaking between accounts on login/logout.
- * - [FEAT] Added logic to AuthService.signOut() to clear the current user's
- * namespaced cache and timer recovery keys upon logout.
- * v1.2.0:
- * - [PERF] Refactored all report getters (getWeeklyReport, etc.) to use Streams
- * instead of Futures. This enables real-time data updates on the reports page.
- * - [PERF] Added `compute` function and a top-level `_processPeriodData` helper
- * to move all heavy report calculations to a background isolate.
- * This fixes the UI lag/freeze on the reports page.
- * - [FIX] Report logic now correctly counts tasks completed *within* a period
- * by summing 'Done' check-ins, instead of just total completed tasks.
- * - [FEAT] Added `getGoalsStream` to provide a real-time stream of all user goals.
  */
 
 import 'dart:convert';
@@ -52,7 +47,7 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
   final List<Goal> allGoals = (params['goals'] as List<dynamic>)
       .map((g) => Goal.fromJson(g as Map<String, dynamic>))
       .toList();
-  final DateTime start = params['start'] as DateTime;
+final DateTime start = params['start'] as DateTime;
   final DateTime end = params['end'] as DateTime;
 
   Duration totalTime = Duration.zero;
@@ -203,7 +198,10 @@ class FirestoreService {
 
   Future<void> archiveGoal(Goal goal) async {
     if (uid == null) return;
-    final archiveDoc = _db.collection('archived_goals').doc(goal.id);
+    // --- FIX: Save to user-specific subcollection ---
+    final archiveDoc =
+        _db.collection('users').doc(uid).collection('archived_goals').doc(
+            goal.id);
     goal.isArchived = true;
     await archiveDoc.set(goal.toJson());
   }
@@ -387,10 +385,13 @@ class FirestoreService {
         'end': startOfYear
       };
 
-      // Get archived goals (still a Future, that's fine)
+      // --- FIX: Query the user-specific subcollection ---
       final querySnapshot = _db
+          .collection('users')
+          .doc(uid)
           .collection('archived_goals')
-          .where('userId', isEqualTo: uid)
+          // --- FIX: Removed redundant where clause ---
+          // .where('userId', isEqualTo: uid)
           .where('createdAt',
               isGreaterThanOrEqualTo: startOfYear.toIso8601String())
           .where('createdAt', isLessThanOrEqualTo: endOfYear.toIso8601String())
