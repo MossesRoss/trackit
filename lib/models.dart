@@ -1,7 +1,10 @@
 /*
  * @author Mosses
- * @version 1.4.0
+ * @version 1.5.0
  * --- CHANGELOG ---
+ * v1.5.0:
+ * - [FEAT] Added 'completedAt' timestamp to Milestone model to track 
+ * completion dates for the weekly email report.
  * v1.4.0:
  * - [FEAT] Added `TimeSession` class to log individual work sessions
  * with timestamps, enabling accurate period-based reporting.
@@ -148,6 +151,8 @@ class Milestone {
   List<TimeSession> timeLog;
   // --- NEW: List to store task check-in records ---
   List<TaskCheckin> checkins;
+  // --- NEW (v1.5.0): Timestamp for when the milestone was completed ---
+  DateTime? completedAt;
 
   Milestone({
     required this.title,
@@ -161,6 +166,7 @@ class Milestone {
     String? id,
     List<TaskCheckin> checkins = const [], // Initialize with empty list
     List<TimeSession> timeLog = const [], // --- FIX: Add timeLog ---
+    this.completedAt, // --- NEW (v1.5.0) ---
   })  : id = id ?? UniqueKey().toString(),
         completedCheckpointIds = List<String>.from(completedCheckpointIds),
         checkins = List<TaskCheckin>.from(checkins),
@@ -189,6 +195,7 @@ class Milestone {
         // 'lastWorkedOn': lastWorkedOn?.toIso8601String(),
         'timeLog': timeLog.map((s) => s.toJson()).toList(),
         'checkins': checkins.map((c) => c.toJson()).toList(),
+        'completedAt': completedAt?.toIso8601String(), // --- NEW (v1.5.0) ---
       };
 
   factory Milestone.fromJson(Map<String, dynamic> json) {
@@ -228,6 +235,10 @@ class Milestone {
           ? []
           : List<TaskCheckin>.from(
               (json['checkins'] as List).map((c) => TaskCheckin.fromJson(c))),
+      // --- NEW (v1.5.0) ---
+      completedAt: json['completedAt'] != null
+          ? DateTime.parse(json['completedAt'])
+          : null,
     );
   }
 }

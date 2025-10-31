@@ -1,7 +1,10 @@
 /*
  * @author Mosses
- * @version 1.4.0
+ * @version 1.5.0
  * --- CHANGELOG ---
+ * v1.5.0:
+ * - [FEAT] Updated '_toggleCheckpoint' to set the 'milestone.completedAt' 
+ * timestamp when a milestone is completed and clear it if it becomes incomplete.
  * v1.4.0:
  * - [FIX] Updated `_addTimeToMilestone` to add a new `TimeSession`
  * to the `milestone.timeLog` list instead of incrementing the
@@ -321,7 +324,7 @@ class _MainPageState extends State<MainPage> {
     }
   }
 
-  // --- configureSelectNotificationSubject (Updated with new log) ---
+  // --- configureSelectNotificationSubject (Unchanged) ---
   void _configureSelectNotificationSubject() {
     // --- FIX: Listen to the new getter from the service ---
     NotificationService()
@@ -613,7 +616,7 @@ class _MainPageState extends State<MainPage> {
     _saveGoals();
   }
 
-  // --- toggleCheckpoint (Unchanged) ---
+  // --- toggleCheckpoint (CHANGED) ---
   void _toggleCheckpoint(Milestone milestone, String checkpointId) {
     debugPrint(
         "Toggling checkpoint: $checkpointId in milestone: ${milestone.id}");
@@ -625,6 +628,21 @@ class _MainPageState extends State<MainPage> {
         milestone.completedCheckpointIds.add(checkpointId);
         debugPrint("Checkpoint $checkpointId marked complete.");
       }
+
+      // --- NEW (v1.5.0): Set completion timestamp ---
+      // Uses the 'isCompleted' getter from the model
+      if (milestone.isCompleted && milestone.completedAt == null) {
+        // This milestone just became complete
+        milestone.completedAt = DateTime.now();
+        debugPrint(
+            "Milestone ${milestone.id} marked as complete at ${milestone.completedAt}");
+      } else if (!milestone.isCompleted && milestone.completedAt != null) {
+        // This milestone was just made incomplete (e.g., user unchecked a task)
+        milestone.completedAt = null;
+        debugPrint("Milestone ${milestone.id} marked as incomplete.");
+      }
+      // --- End of new logic ---
+
       _updateMilestoneLockStatus();
       _checkForGoalCompletion(); // Check if goal is now complete
     });
@@ -712,7 +730,7 @@ class _MainPageState extends State<MainPage> {
     _saveGoals();
   }
 
-  // --- addTimeToMilestone (CHANGED) ---
+  // --- addTimeToMilestone (Unchanged) ---
   void _addTimeToMilestone(String milestoneId, Duration timeToAdd) {
     if (_activeGoal == null) {
       debugPrint("AddTimeToMilestone: Active goal is null. Cannot add time.");
@@ -812,7 +830,7 @@ class _MainPageState extends State<MainPage> {
     }
   }
 
-  // --- build (CHANGED) ---
+  // --- build (Unchanged) ---
   @override
   Widget build(BuildContext context) {
     // --- DEBUG ---
