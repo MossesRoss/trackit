@@ -50,6 +50,7 @@ const String kRecoveryMilestoneKey = 'recovery_milestone_id';
 const String _oldLocalCacheKey = 'all_goals_cache';
 // --- Key for Theme Persistence ---
 const String _kThemePersistenceKey = 'theme_mode';
+const String _kEditModePersistenceKey = 'edit_mode';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -153,8 +154,8 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => ThemeProvider()), // Updated
         ChangeNotifierProvider(create: (_) => AuthService()),
         // --- DEBUG: Add logging to ProxyProvider update ---
-        ProxyProvider<AuthService, FirestoreService>(update: (_, auth,
-            previous) {
+        ProxyProvider<AuthService, FirestoreService>(
+            update: (_, auth, previous) {
           debugPrint(
               "ProxyProvider update: auth.currentUser?.uid = ${auth.currentUser?.uid}");
           // Only create a new instance if uid changes OR if previous is null
@@ -221,23 +222,17 @@ class MilestoneApp extends StatelessWidget {
   }
 }
 
-// --- AuthWrapper (Unchanged) ---
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // --- DEBUG: Listen to AuthService here ---
-    // Use watch to rebuild when auth state changes
     final authService = Provider.of<AuthService>(context);
     debugPrint("AuthWrapper build: Listening to auth state.");
 
-    // Using StreamBuilder is still fine, but Provider.of ensures
-    // we rebuild when notifyListeners is called.
     return StreamBuilder<User?>(
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
-        // --- DEBUG ---
         debugPrint(
             "AuthWrapper StreamBuilder: connectionState=${snapshot.connectionState}, hasData=${snapshot.hasData}");
 
@@ -249,7 +244,6 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.hasData) {
           debugPrint(
               "AuthWrapper: User is logged in (uid: ${snapshot.data?.uid}). Showing MainPage.");
-          // IMPORTANT: Pass the UID here IF NEEDED, though MainPage uses Provider
           return const MainPage();
         }
         debugPrint("AuthWrapper: User is logged out. Showing AuthScreen.");
@@ -259,9 +253,6 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
-// --- MainPage (Unchanged) ---
-// (No changes were required in MainPage itself, as the fixes are
-// in main() and services.dart)
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -282,15 +273,11 @@ class _MainPageState extends State<MainPage> {
     try {
       return _allGoals.firstWhere((g) => g.status == GoalStatus.active);
     } catch (e) {
-      // Return null if no active goal is found, don't crash
       return null;
     }
   }
 
-  // ==========================================================
-  // --- DEBUG FLAG: Set to true for ONE run to clear cache ---
-  final bool _clearCacheOnStartup = false; // <-- SET TO true FOR TESTING
-  // ==========================================================
+  final bool _clearCacheOnStartup = false;
 
   @override
   void initState() {
@@ -301,13 +288,11 @@ class _MainPageState extends State<MainPage> {
     debugPrint(
         "MainPage initState: Called. Initial UID from Provider: $initialUid");
 
-    _loadGoalsAndRecover(); // Load goals AND check for lost time
+    _loadGoalsAndRecover();
     _configureSelectNotificationSubject();
-    _checkNotificationLaunchApp(); // --- FIX: Add this call ---
+    _checkNotificationLaunchApp();
   }
 
-  // --- FIX: Add this new method ---
-  /// Checks if the app was launched from a notification tap.
   void _checkNotificationLaunchApp() async {
     final notificationAppLaunchDetails =
         await NotificationService().getNotificationAppLaunchDetails();
@@ -315,23 +300,17 @@ class _MainPageState extends State<MainPage> {
     if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
       final notificationResponse =
           notificationAppLaunchDetails!.notificationResponse;
-      if (notificationResponse != null && notificationResponse.payload != null) {
+      if (notificationResponse != null &&
+          notificationResponse.payload != null) {
         debugPrint(
             "App LAUNCHED from notification tap: ${notificationResponse.payload}");
-        // Manually pass this to the listener stream
-        // Use the new getter
         NotificationService().notificationSubject.add(notificationResponse);
       }
     }
   }
 
-  // --- configureSelectNotificationSubject (Unchanged) ---
   void _configureSelectNotificationSubject() {
-    // --- FIX: Listen to the new getter from the service ---
-    NotificationService()
-        .notificationSubject
-        .stream
-        .listen((response) async {
+    NotificationService().notificationSubject.stream.listen((response) async {
       debugPrint(
           'NotificationResponse received in UI: payload=${response.payload}, actionId=${response.actionId}, id=${response.id}');
       // Dismiss the notification banner *if* it has an ID
@@ -400,13 +379,40 @@ class _MainPageState extends State<MainPage> {
     });
   }
 
+  Future<void> _setEditMode(bool newValue) async {
+    // Update state immediately for UI responsiveness
+    setState(() {
+      _editMode = newValue;
+    });
+
+    // Save the new value
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kEditModePersistenceKey, newValue);
+      debugPrint("Saved editMode: $newValue");
+    } catch (e) {
+      debugPrint("Error saving edit mode preference: $e");
+    }
+  }
+
   /// Loads all goals and checks for recovered timer data.
   Future<void> _loadGoalsAndRecover() async {
     debugPrint("_loadGoalsAndRecover: Starting...");
     setState(() => _isLoading = true);
 
-    // --- DEBUG: Access FirestoreService via Provider ---
-    // Use read here as we don't need to listen for changes within this method
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Load the edit mode, default to true if not found
+      final savedEditMode = prefs.getBool(_kEditModePersistenceKey) ?? true;
+      if (mounted) {
+        setState(() {
+          _editMode = savedEditMode;
+        });
+        debugPrint("Loaded editMode: $_editMode");
+      }
+    } catch (e) {
+      debugPrint("Error loading edit mode preference: $e");
+    }
     final persistenceService =
         Provider.of<FirestoreService>(context, listen: false);
     debugPrint(
@@ -769,7 +775,8 @@ class _MainPageState extends State<MainPage> {
     }
     // Check if timeToAdd is valid
     if (timeToAdd.inSeconds <= 0) {
-      debugPrint("AddTimeToMilestone: timeToAdd is zero or negative. Skipping.");
+      debugPrint(
+          "AddTimeToMilestone: timeToAdd is zero or negative. Skipping.");
       return;
     }
 
@@ -903,7 +910,7 @@ class _MainPageState extends State<MainPage> {
         isDarkMode: themeProvider.isDarkMode,
         toggleDarkMode: themeProvider.toggleTheme,
         editMode: _editMode,
-        onEditModeChanged: (val) => setState(() => _editMode = val),
+        onEditModeChanged: _setEditMode,
         allGoals: _allGoals, // Pass all goals
       ),
     ];
