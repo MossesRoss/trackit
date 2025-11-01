@@ -1,7 +1,18 @@
 /*
  * @author Mosses
- * @version 1.5.0
+ * @version 1.5.2
  * --- CHANGELOG ---
+ * v1.5.2:
+ * - [FIX] Changed return type of `_toggleCheckpoint` and `toggleCheckpointByIds`
+ * from `void` to `Future<void>` to allow them to be properly `await`ed,
+ * fixing the build error "This expression has type 'void' and can't be used."
+ * v1.5.1:
+ * - [FIX] Made `_saveGoals` and `_checkForGoalCompletion` async and return Futures.
+ * - [FIX] Updated `_toggleCheckpoint` to `await _checkForGoalCompletion`
+ * and then `await _saveGoals` *only if* the goal was not completed.
+ * - [FIX] This resolves a race condition where stats pages (e.g., in Settings)
+ * would load *before* an archived goal was finished saving to Firestore,
+ * causing stats to appear one step behind (e.g., "0/1" milestones complete).
  * v1.5.0:
  * - [FEAT] Updated '_toggleCheckpoint' to set the 'milestone.completedAt' 
  * timestamp when a milestone is completed and clear it if it becomes incomplete.
@@ -10,16 +21,6 @@
  * to the `milestone.timeLog` list instead of incrementing the
  * deprecated `timeSpent` field. This enables accurate, session-based
  * time reporting.
- * v1.3.2:
- * - [FIX] Changed Provider.of<ThemeProvider> in MainPage.build to listen (removed listen: false) 
- * to ensure the settings page UI updates instantly when the theme is toggled.
- * v1.3.0:
- * - [FIX] Added one-time migration logic to main() to clear the old,
- * non-user-specific 'all_goals_cache' from SharedPreferences.
- * v1.2.2:
- * - [FIX] Registered a check for app launch via notification in initState.
- * - [FIX] Updated notification listener to use the new top-level stream
- * from NotificationService to correctly handle background/terminated taps.
  */
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
@@ -385,7 +386,8 @@ class _MainPageState extends State<MainPage> {
           debugPrint(
               "Matched action '${response.actionId}' to status '$status'. Proceeding to record.");
           if (shouldToggleCheckpoint) {
-            toggleCheckpointByIds(goalId, milestoneId, checkpointId);
+            // --- FIX: Await this async call ---
+            await toggleCheckpointByIds(goalId, milestoneId, checkpointId);
           }
           recordTaskCheckin(goalId, milestoneId, checkpointId, status);
         } catch (e) {
@@ -504,7 +506,8 @@ class _MainPageState extends State<MainPage> {
     debugPrint("_loadGoalsAndRecover: Finished.");
   }
 
-  // --- saveGoals (Unchanged) ---
+  // --- saveGoals (CHANGED) ---
+  // --- FIX: Made async so we can await it ---
   Future<void> _saveGoals() async {
     // --- DEBUG ---
     debugPrint("saveGoals: Triggered. Saving ${_allGoals.length} goals.");
@@ -538,7 +541,7 @@ class _MainPageState extends State<MainPage> {
       debugPrint("Added new goal: ${newGoal.id}");
       _selectedIndex = 1; // Go to milestones page
     });
-    _saveGoals(); // Save immediately
+    _saveGoals(); // Save immediately (fire-and-forget is fine here)
 
     // Show dialog (unchanged)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -593,7 +596,7 @@ class _MainPageState extends State<MainPage> {
               .archiveGoal(_activeGoal!);
           debugPrint("Goal status set to givenUp for: ${_activeGoal!.id}");
         });
-        _saveGoals(); // Save immediately
+        _saveGoals(); // Save immediately (fire-and-forget is fine here)
       } else {
         debugPrint("Goal give up cancelled for: ${_activeGoal!.id}");
       }
@@ -613,11 +616,14 @@ class _MainPageState extends State<MainPage> {
       _activeGoal?.milestones.add(milestone);
       _updateMilestoneLockStatus();
     });
-    _saveGoals();
+    _saveGoals(); // (fire-and-forget is fine here)
   }
 
   // --- toggleCheckpoint (CHANGED) ---
-  void _toggleCheckpoint(Milestone milestone, String checkpointId) {
+  // --- FIX: Made async to await completion check and save ---
+  // --- FIX (v1.5.2): Changed return type to Future<void> ---
+  Future<void> _toggleCheckpoint(
+      Milestone milestone, String checkpointId) async {
     debugPrint(
         "Toggling checkpoint: $checkpointId in milestone: ${milestone.id}");
     setState(() {
@@ -642,16 +648,24 @@ class _MainPageState extends State<MainPage> {
         debugPrint("Milestone ${milestone.id} marked as incomplete.");
       }
       // --- End of new logic ---
-
-      _updateMilestoneLockStatus();
-      _checkForGoalCompletion(); // Check if goal is now complete
     });
-    _saveGoals();
+
+    _updateMilestoneLockStatus();
+
+    // --- FIX: Await the completion check. It will save if goal is complete. ---
+    final bool didGoalComplete = await _checkForGoalCompletion();
+
+    // --- FIX: If the goal was *not* just completed, we still need to save. ---
+    if (!didGoalComplete) {
+      await _saveGoals();
+    }
   }
 
-  // --- toggleCheckpointByIds (Unchanged) ---
-  void toggleCheckpointByIds(
-      String goalId, String milestoneId, String checkpointId) {
+  // --- toggleCheckpointByIds (CHANGED) ---
+  // --- FIX: Made async to await _toggleCheckpoint ---
+  // --- FIX (v1.5.2): Changed return type to Future<void> ---
+  Future<void> toggleCheckpointByIds(
+      String goalId, String milestoneId, String checkpointId) async {
     debugPrint(
         "toggleCheckpointByIds called: goal=$goalId, milestone=$milestoneId, checkpoint=$checkpointId");
     Goal? goal;
@@ -672,27 +686,44 @@ class _MainPageState extends State<MainPage> {
 
     // Check if checkpoint exists before toggling
     if (milestone.checkpoints.any((c) => c.id == checkpointId)) {
-      _toggleCheckpoint(milestone, checkpointId);
+      // --- FIX: Await the call ---
+      await _toggleCheckpoint(milestone, checkpointId);
     } else {
       debugPrint(
           "Error: Checkpoint $checkpointId not found in milestone $milestoneId.");
     }
   }
 
-  // --- checkForGoalCompletion (Unchanged) ---
-  void _checkForGoalCompletion() {
-    if (_activeGoal != null && _activeGoal!.isCompleted) {
-      debugPrint("Goal ${_activeGoal!.id} is now complete!");
-      if (!mounted) return;
+  // --- checkForGoalCompletion (CHANGED) ---
+  // --- FIX: Made async, returns bool, and awaits archive/save ---
+  Future<bool> _checkForGoalCompletion() async {
+    // --- FIX: Capture the active goal *before* the setState ---
+    final Goal? goalToComplete = _activeGoal;
+
+    if (goalToComplete != null && goalToComplete.isCompleted) {
+      debugPrint("Goal ${goalToComplete.id} is now complete!");
+      if (!mounted) return false;
+
+      // Set state synchronously
       setState(() {
-        _activeGoal!.status = GoalStatus.achieved;
-        _editMode =
-            true; // Allow editing again? Or should stay false? Revisit logic if needed.
-        // Use read
-        Provider.of<FirestoreService>(context, listen: false)
-            .archiveGoal(_activeGoal!);
+        goalToComplete.status = GoalStatus.achieved;
+        _editMode = true;
       });
-      _saveGoals();
+
+      try {
+        // --- FIX: Archive goal and await it ---
+        await Provider.of<FirestoreService>(context, listen: false)
+            .archiveGoal(goalToComplete);
+        debugPrint("Goal ${goalToComplete.id} archived in Firestore.");
+
+        // --- FIX: Save all goals (to update cache/main collection) and await it ---
+        await _saveGoals();
+        debugPrint("Main goals list saved after archiving.");
+      } catch (e) {
+        debugPrint("Error during goal completion/archiving: $e");
+        // Don't throw, just log.
+      }
+
       // Show dialog (unchanged)
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -701,7 +732,7 @@ class _MainPageState extends State<MainPage> {
           builder: (ctx) => AlertDialog(
             title: const Text('Goal Achieved!'),
             content: Text(
-                'Congratulations! You have completed all milestones for "${_activeGoal!.title}".'),
+                'Congratulations! You have completed all milestones for "${goalToComplete.title}".'),
             actions: [
               TextButton(
                 child: const Text('Awesome!'),
@@ -711,9 +742,9 @@ class _MainPageState extends State<MainPage> {
           ),
         );
       });
-    } else {
-      // debugPrint("Goal ${_activeGoal?.id} is not yet complete."); // Optional verbose logging
+      return true; // --- FIX: Return true (goal was completed) ---
     }
+    return false; // --- FIX: Return false (goal not completed) ---
   }
 
   // --- deleteMilestone (Unchanged) ---
@@ -727,7 +758,7 @@ class _MainPageState extends State<MainPage> {
       _activeGoal?.milestones.removeWhere((m) => m.id == id);
       _updateMilestoneLockStatus();
     });
-    _saveGoals();
+    _saveGoals(); // (fire-and-forget is fine here)
   }
 
   // --- addTimeToMilestone (Unchanged) ---
@@ -771,7 +802,7 @@ class _MainPageState extends State<MainPage> {
           "Milestone ${milestone.id} updated: New session added. Total time is now ${milestone.timeSpent}, lastWorkedOn=${milestone.lastWorkedOn}");
     });
     // Save goals immediately after state change involving time
-    _saveGoals();
+    _saveGoals(); // (fire-and-forget is fine here)
   }
 
   // --- recordTaskCheckin (Unchanged) ---
@@ -801,7 +832,7 @@ class _MainPageState extends State<MainPage> {
       milestone.checkins
           .add(TaskCheckin(checkpointId: checkpointId, status: status));
     });
-    _saveGoals();
+    _saveGoals(); // (fire-and-forget is fine here)
     debugPrint("Check-in recorded successfully.");
   }
 
