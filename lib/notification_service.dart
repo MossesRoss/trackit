@@ -1,11 +1,15 @@
 /*
  * @author Mosses
- * @version 1.1.0
+ * @version 1.2.0
  * --- CHANGELOG ---
+ * v1.2.0:
+ * - [FEAT] Removed notification actions (Done, Doing, etc.) per new design.
+ * - [FEAT] Tapping the notification now brings the user into the app
+ * to show an in-app dialog instead.
  * v1.1.0:
- * - [FIX] Moved notification stream to top-level to handle background/terminated taps.
- * - [FIX] Added launch details check to NotificationService.
- * - [FEAT] Added convenience getter `notificationSubject` for the top-level stream.
+ * - [FIX] Moved notification stream to top-level.
+ * - [FIX] Added launch details check.
+ * - [FEAT] Added convenience getter `notificationSubject`.
  */
 // import 'dart:convert';
 import 'dart:async';
@@ -16,7 +20,8 @@ import 'package:timezone/timezone.dart' as tz;
 // import './models.dart';
 import 'package:flutter/foundation.dart'; // Added for debugPrint
 
-// --- Action IDs for notifications ---
+// --- Action IDs for notifications (NO LONGER USED BY NOTIFICATION) ---
+// --- Kept here as they are used by models.dart ---
 const String doneActionId = 'DONE_ACTION';
 const String doingActionId = 'DOING_ACTION';
 const String willDoActionId = 'WILL_DO_ACTION';
@@ -49,7 +54,7 @@ void notificationTapBackground(NotificationResponse notificationResponse) {
   // Handle your tap events here.
   debugPrint(
       'Notification tapped in background: ${notificationResponse.payload}');
-  
+
   // --- FIX: Add the response to the top-level stream ---
   selectNotificationSubject.add(notificationResponse);
 }
@@ -140,12 +145,13 @@ class NotificationService {
       channelDescription: 'Channel for daily milestone reminders.',
       importance: Importance.max,
       priority: Priority.high,
-      actions: <AndroidNotificationAction>[
-        AndroidNotificationAction(doneActionId, 'Done'),
-        AndroidNotificationAction(doingActionId, 'Doing'),
-        AndroidNotificationAction(willDoActionId, 'Will Do'),
-        AndroidNotificationAction(wontDoActionId, 'Won\'t Do'),
-      ],
+      // --- FIX: REMOVED ACTIONS ---
+      // actions: <AndroidNotificationAction>[
+      //   AndroidNotificationAction(doneActionId, 'Done'),
+      //   AndroidNotificationAction(doingActionId, 'Doing'),
+      //   AndroidNotificationAction(willDoActionId, 'Will Do'),
+      //   AndroidNotificationAction(wontDoActionId, 'Won\'t Do'),
+      // ],
     );
 
     const NotificationDetails notificationDetails = NotificationDetails(
@@ -186,12 +192,13 @@ class NotificationService {
       channelDescription: 'Channel for immediate task check-ins.',
       importance: Importance.max,
       priority: Priority.high,
-      actions: <AndroidNotificationAction>[
-        AndroidNotificationAction(doneActionId, 'Done'),
-        AndroidNotificationAction(doingActionId, 'Doing'),
-        AndroidNotificationAction(willDoActionId, 'Will Do'),
-        AndroidNotificationAction(wontDoActionId, 'Won\'t Do'),
-      ],
+      // --- FIX: REMOVED ACTIONS ---
+      // actions: <AndroidNotificationAction>[
+      //   AndroidNotificationAction(doneActionId, 'Done'),
+      //   AndroidNotificationAction(doingActionId, 'Doing'),
+      //   AndroidNotificationAction(willDoActionId, 'Will Do'),
+      //   AndroidNotificationAction(wontDoActionId, 'Won\'t Do'),
+      // ],
     );
 
     const NotificationDetails notificationDetails = NotificationDetails(

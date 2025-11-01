@@ -1,7 +1,14 @@
 /*
  * @author Mosses
- * @version 1.3.0
+ * @version 1.4.0
  * --- CHANGELOG ---
+ * v1.4.0:
+ * - [FIX] Changed `OverallReportView` to use a `StreamBuilder` on
+ * `firestoreService.getGoalsStream()` instead of relying on a
+ * prop-drilled `activeGoal`. This fixes a bug where the 'Overall'
+ * tab would show stale data after a notification action.
+ * - [FEAT] Removed `activeGoal` parameter from `ReportsPage` as it's
+ * no longer needed.
  * v1.3.0:
  * - [PERF] Stored report streams in `initState` to prevent them from
  * being rebuilt, fixing the real-time update bug.
@@ -79,8 +86,10 @@ class ProgressPieChart extends StatelessWidget {
 }
 
 class ReportsPage extends StatefulWidget {
-  final Goal? activeGoal;
-  const ReportsPage({super.key, this.activeGoal});
+  // --- FIX: Removed activeGoal property ---
+  // final Goal? activeGoal;
+  // const ReportsPage({super.key, this.activeGoal});
+  const ReportsPage({super.key});
 
   @override
   State<ReportsPage> createState() => _ReportsPageState();
@@ -139,8 +148,9 @@ class _ReportsPageState extends State<ReportsPage>
       body: TabBarView(
         controller: _tabController,
         children: [
-          // --- FIX: Add new 'Overall' view ---
-          OverallReportView(activeGoal: widget.activeGoal),
+          // --- FIX: Remove activeGoal property ---
+          const OverallReportView(),
+          // Was: OverallReportView(activeGoal: widget.activeGoal),
 
           // --- FIX: Pass the persistent streams from state ---
           ReportView(
@@ -164,45 +174,68 @@ class _ReportsPageState extends State<ReportsPage>
 
 // --- NEW: Widget for the 'Overall' tab ---
 class OverallReportView extends StatelessWidget {
-  final Goal? activeGoal;
-  const OverallReportView({super.key, this.activeGoal});
+  // --- FIX: Removed activeGoal property ---
+  // final Goal? activeGoal;
+  // const OverallReportView({super.key, this.activeGoal});
+  const OverallReportView({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (activeGoal == null || activeGoal!.totalTasks == 0) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text(
-            "No active goal to display. Set a goal and complete tasks to see your progress here.",
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
+    // --- FIX: Get activeGoal from the stream ---
+    final firestoreService = Provider.of<FirestoreService>(context);
 
-    return Center(
-      // --- STYLE: Add padding and change alignment ---
-      child: Padding(
-        padding: const EdgeInsets.only(top: 32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start, // <-- FIX
-          children: [
-            // --- STYLE: Remove redundant title ---
-            // const Text(
-            //   "Overall Goal Progress",
-            //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            // ),
-            // --- STYLE: Remove extra space ---
-            // const SizedBox(height: 24),
-            ProgressPieChart(
-              completed: activeGoal!.completedTasks,
-              total: activeGoal!.totalTasks,
+    return StreamBuilder<List<Goal>>(
+        stream: firestoreService.getGoalsStream(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text("Loading..."));
+          }
+
+          final allGoals = snapshot.data!;
+          Goal? activeGoal;
+          try {
+            activeGoal =
+                allGoals.firstWhere((g) => g.status == GoalStatus.active);
+          } catch (e) {
+            activeGoal = null;
+          }
+          // --- End of fix ---
+
+          if (activeGoal == null || activeGoal.totalTasks == 0) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  "No active goal to display. Set a goal and complete tasks to see your progress here.",
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
+
+          return Center(
+            // --- STYLE: Add padding and change alignment ---
+            child: Padding(
+              padding: const EdgeInsets.only(top: 32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.start, // <-- FIX
+                children: [
+                  // --- STYLE: Remove redundant title ---
+                  // const Text(
+                  //   "Overall Goal Progress",
+                  //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  // ),
+                  // --- STYLE: Remove extra space ---
+                  // const SizedBox(height: 24),
+                  ProgressPieChart(
+                    completed: activeGoal.completedTasks,
+                    total: activeGoal.totalTasks,
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
-    );
+          );
+        });
   }
 }
 

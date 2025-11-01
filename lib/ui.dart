@@ -743,7 +743,8 @@ class SettingsPage extends StatelessWidget {
             subtitle: const Text("View your weekly and monthly progress"),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
                 // Pass the activeGoal to ReportsPage
-                builder: (_) => ReportsPage(activeGoal: activeGoal))),
+                // This is the NEW, correct code
+                builder: (_) => const ReportsPage())),
           ),
           ListTile(
             leading: const Icon(Icons.history_rounded),
