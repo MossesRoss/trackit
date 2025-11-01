@@ -1,24 +1,21 @@
 /*
  * @author Mosses
- * @version 1.4.2
+ * @version 1.4.5
  * --- CHANGELOG ---
+ * v1.4.5:
+ * - [FIX] Wrapped MilestoneNode in IntrinsicHeight to resolve RenderFlex layout crash.
+ * - [FIX] Added `as ui` prefix to `dart:ui` import to fix TextDirection.ltr name collision.
+ * v1.4.4:
+ * - [FIX] Added explicit `dart:ui` import to resolve `TextDirection` error.
+ * v1.4.3:
+ * - [FIX] Resolved visual bug where milestone timeline would disconnect
+ * or render incorrectly when expanding/collapsing cards.
+ * - [REFACTOR] Moved timeline dot and icon painting into `LinePainter`.
  * v1.4.2:
- * - [FIX] Added `didUpdateWidget` to `_HomePageState` to refetch suggestions
- * when the active goal changes.
- * - [FIX] Modified `_fetchSuggestion` to return immediately if `_nextMilestone`
- * is null, preventing redundant "All complete" messages from being
- * displayed alongside status text.
- * v1.4.1:
- * - [FIX] Moved milestone onboarding animation logic from `initState` to
- * `didUpdateWidget` to correctly trigger when a new goal is set.
- * - [FIX] Corrected logic on `HomePage` to show a "Go to Milestones" message
- * for new goals instead of "All milestones complete".
- * v1.4.0:
- * - [FEAT] Added onboarding helper text to MilestonesPage when it's empty.
- * - [FEAT] Added a pulsing animation to the 'Add Milestone' button.
  */
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui; // <-- FIX: Added 'as ui' prefix
 import 'package:flutter/material.dart';
 // import 'package:flutter/foundation.dart' show debugPrint; // FIX: Unnecessary import
 import 'package:intl/intl.dart';
@@ -634,15 +631,19 @@ class MilestonesPageState extends State<MilestonesPage>
                   itemCount: widget.activeGoal!.milestones.length,
                   itemBuilder: (context, index) {
                     final milestone = widget.activeGoal!.milestones[index];
-                    return MilestoneNode(
-                      key: ValueKey('${milestone.id}-${milestone.progress}'),
-                      milestone: milestone,
-                      isFirst: index == 0,
-                      isLast: index == widget.activeGoal!.milestones.length - 1,
-                      onToggleCheckpoint: widget.onToggleCheckpoint,
-                      onDelete: () => widget.onDeleteMilestone(milestone.id),
-                      editMode: widget.editMode,
-                      lineColor: lineColor, // --- FIX: Pass line color ---
+                    // --- FIX: Wrap in IntrinsicHeight to solve layout crash ---
+                    return IntrinsicHeight(
+                      child: MilestoneNode(
+                        key: ValueKey('${milestone.id}-${milestone.progress}'),
+                        milestone: milestone,
+                        isFirst: index == 0,
+                        isLast:
+                            index == widget.activeGoal!.milestones.length - 1,
+                        onToggleCheckpoint: widget.onToggleCheckpoint,
+                        onDelete: () => widget.onDeleteMilestone(milestone.id),
+                        editMode: widget.editMode,
+                        lineColor: lineColor, // --- FIX: Pass line color ---
+                      ),
                     );
                   },
                 ),
@@ -904,7 +905,7 @@ class _GoalSetterCardState extends State<GoalSetterCard> {
   }
 }
 
-// --- MilestoneNode (FIXED Dark Mode) ---
+// --- MilestoneNode (FIXED Dark Mode & Timeline) ---
 class MilestoneNode extends StatelessWidget {
   final Milestone milestone;
   final bool isFirst;
@@ -1014,37 +1015,24 @@ class MilestoneNode extends StatelessWidget {
         : Theme.of(context).disabledColor;
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch, // <-- FIX 1
       children: [
         SizedBox(
           width: 40,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CustomPaint(
-                size: const Size(2, 80),
-                // --- FIX: Pass theme-aware line color ---
-                painter: LinePainter(
-                    isFirst: isFirst, isLast: isLast, lineColor: lineColor),
-              ),
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: primaryColor,
-                ),
-                child: Icon(
-                  milestone.isCompleted
-                      ? Icons.check_rounded
-                      : milestone.isUnlocked
-                          ? Icons.flag_rounded
-                          : Icons.lock_rounded,
-                  color: Colors.white,
-                  size: 12,
-                ),
-              ),
-            ],
+          child: CustomPaint(
+            // <-- FIX 2: Replace Column
+            painter: LinePainter(
+              isFirst: isFirst,
+              isLast: isLast,
+              lineColor: lineColor,
+              dotColor: primaryColor, // Pass color
+              // Pass icon data
+              icon: milestone.isCompleted
+                  ? Icons.check_rounded
+                  : milestone.isUnlocked
+                      ? Icons.flag_rounded
+                      : Icons.lock_rounded,
+            ),
           ),
         ),
         Expanded(
@@ -1059,10 +1047,11 @@ class MilestoneNode extends StatelessWidget {
               ),
               child: ExpansionTile(
                 enabled: milestone.isUnlocked,
+                shape: const Border(),
+                collapsedShape: const Border(),
                 title: Text(milestone.title,
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        // --- FIX: Use theme-aware disabled color ---
                         color: milestone.isUnlocked
                             ? null
                             : Theme.of(context).disabledColor)),
@@ -1148,37 +1137,85 @@ class MilestoneNode extends StatelessWidget {
   }
 }
 
-// --- LinePainter (FIXED Dark Mode) ---
+// --- LinePainter (FIXED Dark Mode & Dynamic Height) ---
 class LinePainter extends CustomPainter {
   final bool isFirst;
   final bool isLast;
-  final Color lineColor; // --- FIX: Added line color ---
+  final Color lineColor;
+  final Color dotColor;
+  final IconData icon;
 
-  LinePainter(
-      {required this.isFirst,
-      required this.isLast,
-      required this.lineColor // --- FIX: Added line color ---
-      });
+  // Define a fixed vertical position for the dot
+  final double dotY = 40.0; // This is the center of the dot
+  final double dotRadius = 10.0;
+  final double iconSize = 12.0;
+
+  LinePainter({
+    required this.isFirst,
+    required this.isLast,
+    required this.lineColor,
+    required this.dotColor,
+    required this.icon,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // --- FIX: Use theme-aware line color ---
+    final double centerX = size.width / 2;
+
+    // --- 1. Draw the vertical lines ---
     final paint = Paint()
       ..color = lineColor
       ..strokeWidth = 2;
 
     if (!isFirst) {
-      canvas.drawLine(Offset(size.width / 2, 0),
-          Offset(size.width / 2, size.height / 2 - 10), paint);
+      // Draw top line
+      canvas.drawLine(
+          Offset(centerX, 0), Offset(centerX, dotY - dotRadius), paint);
     }
     if (!isLast) {
-      canvas.drawLine(Offset(size.width / 2, size.height / 2 + 10),
-          Offset(size.width / 2, size.height), paint);
+      // Draw bottom line
+      canvas.drawLine(Offset(centerX, dotY + dotRadius),
+          Offset(centerX, size.height), paint);
     }
+
+    // --- 2. Draw the dot ---
+    final dotPaint = Paint()..color = dotColor;
+    canvas.drawCircle(Offset(centerX, dotY), dotRadius, dotPaint);
+
+    // --- 3. Draw the icon ---
+    final textPainter = TextPainter(
+      textDirection: ui.TextDirection.ltr, // <-- FIX: Used 'ui.' prefix
+    );
+    final iconColor = Colors.white; // Icon is always white
+
+    textPainter.text = TextSpan(
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        color: iconColor,
+        fontSize: iconSize,
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+      ),
+    );
+
+    textPainter.layout();
+    // Center the icon inside the dot
+    final iconOffset = Offset(
+      centerX - textPainter.width / 2,
+      dotY - textPainter.height / 2,
+    );
+    textPainter.paint(canvas, iconOffset);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant LinePainter oldDelegate) {
+    // Check if any property changed
+    return oldDelegate.isFirst != isFirst ||
+        oldDelegate.isLast != isLast ||
+        oldDelegate.lineColor != lineColor ||
+        oldDelegate.dotColor != dotColor ||
+        oldDelegate.icon != icon;
+  }
 }
 
 // --- AddMilestoneForm (Unchanged) ---
