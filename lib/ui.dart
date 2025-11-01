@@ -1,16 +1,21 @@
 /*
  * @author Mosses
- * @version 1.3.2
+ * @version 1.4.2
  * --- CHANGELOG ---
- * v1.3.2:
- * - [FEAT] Updated GoalTimerCircle to use RichText for the total time display,
- * reducing the opacity of the 'h' and 'm' characters as requested.
- * v1.3.1:
- * - [FIX] Updated time formatting on HomePage timer circle to be accurate.
- * - [CLEANUP] Replaced inaccurate _formatTotalHours with the more precise _formatDuration logic (from GoalDetailsPage).
- * v1.3.0:
- * - [FEAT] Replaced Upgrade to Pro dialog with a dedicated page (UpgradePage).
- * - [CLEANUP] Removed unused _showUpgradeDialog and _BenefitTile widgets.
+ * v1.4.2:
+ * - [FIX] Added `didUpdateWidget` to `_HomePageState` to refetch suggestions
+ * when the active goal changes.
+ * - [FIX] Modified `_fetchSuggestion` to return immediately if `_nextMilestone`
+ * is null, preventing redundant "All complete" messages from being
+ * displayed alongside status text.
+ * v1.4.1:
+ * - [FIX] Moved milestone onboarding animation logic from `initState` to
+ * `didUpdateWidget` to correctly trigger when a new goal is set.
+ * - [FIX] Corrected logic on `HomePage` to show a "Go to Milestones" message
+ * for new goals instead of "All milestones complete".
+ * v1.4.0:
+ * - [FEAT] Added onboarding helper text to MilestonesPage when it's empty.
+ * - [FEAT] Added a pulsing animation to the 'Add Milestone' button.
  */
 import 'dart:async';
 import 'dart:convert';
@@ -26,7 +31,7 @@ import './services.dart';
 import './reports_page.dart';
 import './notification_service.dart';
 import './guide_page.dart';
-import './upgrade_page.dart'; // --- MOD: Import the new upgrade page ---
+import './upgrade_page.dart';
 
 // --- Keys for SharedPreferences Timer Recovery ---
 const String kRecoveryTimeKey = 'recovery_time_seconds';
@@ -69,8 +74,37 @@ class _HomePageState extends State<HomePage> {
     _fetchSuggestion();
   }
 
+  // --- NEW: Add didUpdateWidget to handle goal changes ---
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If the active goal ID has changed, fetch a new suggestion
+    if (oldWidget.activeGoal?.id != widget.activeGoal?.id) {
+      // Use postFrameCallback to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _fetchSuggestion();
+        }
+      });
+    }
+  }
+
   Future<void> _fetchSuggestion() async {
     setState(() => _isLoading = true);
+
+    // --- NEW FIX ---
+    // If there's no *next* milestone (either goal is new or finished),
+    // we don't need to show a suggestion tip. The main UI handles this.
+    if (_nextMilestone == null) {
+      if (mounted) {
+        setState(() {
+          _suggestion = ""; // Clear any old suggestion
+          _isLoading = false;
+        });
+      }
+      return; // Don't proceed to fetch
+    }
+    // --- END NEW FIX ---
 
     final prefs = await SharedPreferences.getInstance();
     final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -151,7 +185,24 @@ class _HomePageState extends State<HomePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 40),
-                    if (_nextMilestone != null)
+                    // --- FIX: Modify logic for empty vs. completed goals ---
+                    if (widget.activeGoal!.milestones.isEmpty)
+                      const Center(
+                        child: Text(
+                          "Goal set! Go to the Milestones page to add your first task.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 16, fontStyle: FontStyle.italic),
+                        ),
+                      )
+                    else if (_nextMilestone == null)
+                      const Center(
+                        child: Text(
+                          "All milestones complete! 🎉",
+                          style: TextStyle(fontSize: 18),
+                        ),
+                      )
+                    else
                       GoalTimerCircle(
                         // Pass key to update when goal time changes
                         key: ValueKey(
@@ -159,11 +210,7 @@ class _HomePageState extends State<HomePage> {
                         goal: widget.activeGoal!,
                         nextMilestone: _nextMilestone!,
                         onTimeAdd: widget.onTimeAdd,
-                      )
-                    else
-                      const Center(
-                          child: Text("All milestones complete! 🎉",
-                              style: TextStyle(fontSize: 18))),
+                      ),
                     const SizedBox(height: 40),
                     _isLoading
                         ? const Center(child: CircularProgressIndicator())
@@ -350,11 +397,11 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
   @override
   Widget build(BuildContext context) {
     final Color primaryColor = Theme.of(context).colorScheme.primary;
-    
+
     // --- FEAT: Build RichText for total time display ---
     final String totalTimeText = _formatTotalTime(widget.goal.totalTimeSpent);
     final double fontSize = totalTimeText.length > 8 ? 30 : 36; // Adjusted size
-    
+
     final TextStyle numberStyle = TextStyle(
       fontSize: fontSize,
       fontWeight: FontWeight.bold,
@@ -369,7 +416,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
 
     final List<TextSpan> spans = [];
     final RegExp simpleRegex = RegExp(r'(\d+)([hms])');
-    final parts = totalTimeText.split(' '); // e.g., ["4h", "47m"] or ["0m", "0s"]
+    final parts =
+        totalTimeText.split(' '); // e.g., ["4h", "47m"] or ["0m", "0s"]
 
     for (int i = 0; i < parts.length; i++) {
       final part = parts[i];
@@ -390,7 +438,6 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
       }
     }
     // --- End of RichText build ---
-
 
     return GestureDetector(
       onLongPress: _onLongPress,
@@ -453,7 +500,7 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
   }
 }
 
-// --- MilestonesPage (Unchanged) ---
+// --- MilestonesPage (MODIFIED) ---
 class MilestonesPage extends StatefulWidget {
   final Goal? activeGoal;
   final Function(Milestone) onAddMilestone;
@@ -473,8 +520,63 @@ class MilestonesPage extends StatefulWidget {
   State<MilestonesPage> createState() => MilestonesPageState();
 }
 
-class MilestonesPageState extends State<MilestonesPage> {
+// --- FIX: Add SingleTickerProviderStateMixin for animation ---
+class MilestonesPageState extends State<MilestonesPage>
+    with SingleTickerProviderStateMixin {
+  // --- NEW: Animation controller for the '+' icon ---
+  late AnimationController _iconAnimationController;
+  late Animation<double> _iconAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    // --- NEW: Initialize animation ---
+    _iconAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+
+    _iconAnimation = Tween(begin: 1.0, end: 1.25).animate(
+      CurvedAnimation(
+        parent: _iconAnimationController,
+        curve: Curves.easeInOut,
+      ),
+    );
+
+    // --- NEW: Start animation only if milestones are empty ---
+    // This runs ONCE on first load
+    if (widget.activeGoal != null && widget.activeGoal!.milestones.isEmpty) {
+      _iconAnimationController.repeat(reverse: true);
+    }
+  }
+
+  // --- NEW: Add didUpdateWidget to handle goal changes ---
+  @override
+  void didUpdateWidget(covariant MilestonesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Check animation logic when the widget's goal changes
+    if (widget.activeGoal != null && widget.activeGoal!.milestones.isEmpty) {
+      // Goal is active and empty, start animation
+      _iconAnimationController.repeat(reverse: true);
+    } else {
+      // Goal is null or has milestones, stop animation
+      _iconAnimationController.stop();
+      _iconAnimationController.reset(); // Reset to normal size
+    }
+  }
+
+  @override
+  void dispose() {
+    // --- NEW: Dispose controller ---
+    _iconAnimationController.dispose();
+    super.dispose();
+  }
+
   void showAddMilestoneDialog(BuildContext context) {
+    // --- NEW: Stop animation when button is pressed ---
+    _iconAnimationController.stop();
+    _iconAnimationController.reset(); // --- NEW: Reset scale ---
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -499,18 +601,34 @@ class MilestonesPageState extends State<MilestonesPage> {
         title: const Text('Milestones'),
         actions: [
           if (widget.editMode && widget.activeGoal != null)
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline_rounded),
-              onPressed: () => showAddMilestoneDialog(context),
-              tooltip: 'Add Milestone',
+            // --- NEW: Wrap icon button in animation ---
+            ScaleTransition(
+              scale: _iconAnimation,
+              child: IconButton(
+                icon: const Icon(Icons.add_circle_outline_rounded),
+                onPressed: () => showAddMilestoneDialog(context),
+                tooltip: 'Add Milestone',
+              ),
             ),
         ],
       ),
       body: widget.activeGoal == null
           ? const Center(child: Text("Set a main goal on the Home page first."))
           : widget.activeGoal!.milestones.isEmpty
-              ? const Center(
-                  child: Text("No milestones yet. Add one to start!"))
+              // --- NEW: Updated empty state UI ---
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Text(
+                      "Your goal is set!\n\nTap the '+' button above to add your first milestone.",
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Theme.of(context).textTheme.bodySmall?.color,
+                            height: 1.5,
+                          ),
+                    ),
+                  ),
+                )
               : ListView.builder(
                   padding: const EdgeInsets.all(16.0),
                   itemCount: widget.activeGoal!.milestones.length,
@@ -905,8 +1023,8 @@ class MilestoneNode extends StatelessWidget {
               CustomPaint(
                 size: const Size(2, 80),
                 // --- FIX: Pass theme-aware line color ---
-                painter:
-                    LinePainter(isFirst: isFirst, isLast: isLast, lineColor: lineColor),
+                painter: LinePainter(
+                    isFirst: isFirst, isLast: isLast, lineColor: lineColor),
               ),
               Container(
                 width: 20,
@@ -1034,12 +1152,12 @@ class LinePainter extends CustomPainter {
   final bool isFirst;
   final bool isLast;
   final Color lineColor; // --- FIX: Added line color ---
-  
-  LinePainter({
-    required this.isFirst, 
-    required this.isLast, 
-    required this.lineColor // --- FIX: Added line color ---
-  });
+
+  LinePainter(
+      {required this.isFirst,
+      required this.isLast,
+      required this.lineColor // --- FIX: Added line color ---
+      });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1127,8 +1245,7 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
           String errorText =
               "Could not get suggestions. Please check your connection.";
           if (result.error == "NO_API_KEY") {
-            errorText =
-                "AI features are offline. (Dev: Check Apps Script URL)";
+            errorText = "AI features are offline. (Dev: Check Apps Script URL)";
           }
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(errorText),
@@ -1324,20 +1441,24 @@ class GoalDetailsPage extends StatelessWidget {
   const GoalDetailsPage({super.key, required this.goal});
 
   String _formatDuration(Duration duration) {
-    if (duration.inHours > 0) return "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
-    if (duration.inMinutes > 0) return "${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s";
+    if (duration.inHours > 0) {
+      return "${duration.inHours}h ${duration.inMinutes.remainder(60)}m";
+    }
+    if (duration.inMinutes > 0) {
+      return "${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s";
+    }
     return "${duration.inSeconds}s";
   }
 
   @override
   Widget build(BuildContext context) {
     final Color lineColor = Theme.of(context).dividerColor;
-    
+
     // Determine status color and icon
     Color statusColor;
     IconData statusIcon;
-    final String statusText = goal.status.name[0].toUpperCase() +
-        goal.status.name.substring(1);
+    final String statusText =
+        goal.status.name[0].toUpperCase() + goal.status.name.substring(1);
 
     switch (goal.status) {
       case GoalStatus.active:
@@ -1353,7 +1474,7 @@ class GoalDetailsPage extends StatelessWidget {
         statusIcon = Icons.cancel_rounded;
         break;
     }
-    
+
     return Scaffold(
       appBar: AppBar(
         title: Text(goal.title),
@@ -1368,27 +1489,28 @@ class GoalDetailsPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Goal Summary", style: Theme.of(context).textTheme.titleLarge),
+                  Text("Goal Summary",
+                      style: Theme.of(context).textTheme.titleLarge),
                   const Divider(height: 24),
                   _DetailRow(
-                    icon: statusIcon, 
+                    icon: statusIcon,
                     iconColor: statusColor,
-                    title: "Status", 
+                    title: "Status",
                     value: statusText,
                   ),
                   _DetailRow(
-                    icon: Icons.calendar_today_rounded, 
-                    title: "Created On", 
+                    icon: Icons.calendar_today_rounded,
+                    title: "Created On",
                     value: DateFormat.yMMMd().format(goal.createdAt),
                   ),
                   _DetailRow(
-                    icon: Icons.timer_rounded, 
-                    title: "Total Time Spent", 
+                    icon: Icons.timer_rounded,
+                    title: "Total Time Spent",
                     value: _formatDuration(goal.totalTimeSpent),
                   ),
-                   _DetailRow(
-                    icon: Icons.task_alt_rounded, 
-                    title: "Tasks Completed", 
+                  _DetailRow(
+                    icon: Icons.task_alt_rounded,
+                    title: "Tasks Completed",
                     value: "${goal.completedTasks} / ${goal.totalTasks}",
                   ),
                 ],
@@ -1401,26 +1523,28 @@ class GoalDetailsPage extends StatelessWidget {
 
           // --- Immutable Milestone List ---
           goal.milestones.isEmpty
-            ? const Center(child: Text("No milestones were added for this goal."))
-            : ListView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              shrinkWrap: true,
-              itemCount: goal.milestones.length,
-              itemBuilder: (context, index) {
-                final milestone = goal.milestones[index];
-                return MilestoneNode(
-                  key: ValueKey(milestone.id),
-                  milestone: milestone,
-                  isFirst: index == 0,
-                  isLast: index == goal.milestones.length - 1,
-                  // --- Pass dummy/empty functions to make it read-only ---
-                  onToggleCheckpoint: (m, c) {}, // Does nothing
-                  onDelete: () {}, // Does nothing
-                  editMode: false, // Disables delete button and toggle logic
-                  lineColor: lineColor,
-                );
-              },
-            ),
+              ? const Center(
+                  child: Text("No milestones were added for this goal."))
+              : ListView.builder(
+                  physics: const NeverScrollableScrollPhysics(),
+                  shrinkWrap: true,
+                  itemCount: goal.milestones.length,
+                  itemBuilder: (context, index) {
+                    final milestone = goal.milestones[index];
+                    return MilestoneNode(
+                      key: ValueKey(milestone.id),
+                      milestone: milestone,
+                      isFirst: index == 0,
+                      isLast: index == goal.milestones.length - 1,
+                      // --- Pass dummy/empty functions to make it read-only ---
+                      onToggleCheckpoint: (m, c) {}, // Does nothing
+                      onDelete: () {}, // Does nothing
+                      editMode:
+                          false, // Disables delete button and toggle logic
+                      lineColor: lineColor,
+                    );
+                  },
+                ),
         ],
       ),
     );
@@ -1433,13 +1557,12 @@ class _DetailRow extends StatelessWidget {
   final String title;
   final String value;
   final Color? iconColor;
-  
-  const _DetailRow({
-    required this.icon, 
-    required this.title, 
-    required this.value,
-    this.iconColor
-  });
+
+  const _DetailRow(
+      {required this.icon,
+      required this.title,
+      required this.value,
+      this.iconColor});
 
   @override
   Widget build(BuildContext context) {
@@ -1447,17 +1570,22 @@ class _DetailRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
-          Icon(icon, color: iconColor ?? Theme.of(context).colorScheme.primary, size: 20),
+          Icon(icon,
+              color: iconColor ?? Theme.of(context).colorScheme.primary,
+              size: 20),
           const SizedBox(width: 16),
           Text(title, style: Theme.of(context).textTheme.titleSmall),
           const Spacer(),
-          Text(value, style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold)),
+          Text(value,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 }
-
 
 // --- NotificationsSettingsPage (Unchanged) ---
 class NotificationsSettingsPage extends StatefulWidget {
