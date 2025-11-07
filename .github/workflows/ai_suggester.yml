@@ -1,0 +1,113 @@
+# AI Commit Analyzer & Issue Suggester
+# Author: Mosses
+# Version: 1.0.0
+#
+# Changelog:
+# v1.0.0 - Initial creation.
+#   - Triggers on push to 'main' branch.
+#   - Gets commit diff.
+#   - Calls Gemini API for analysis.
+#   - Creates a new GitHub issue with suggestions.
+
+name: AI Commit Analyzer
+
+# This action triggers on every push to your 'main' branch
+on:
+  push:
+    branches:
+      - main
+      # You can add other branches like 'develop'
+      # - develop
+
+# These permissions are required for the action to work
+# contents: read - to check out code and run git diff
+# issues: write - to create the new issue
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  analyze-commit:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Check out the code to access the git history
+      - name: Check out repository
+        uses: actions/checkout@v4
+        # We need to fetch more than just the last commit to run diff
+        with:
+          fetch-depth: 2
+
+      # 2. Get the diff of the last commit and format it for JSON
+      # This finds the changes between the last commit (HEAD~1) and the current one (HEAD)
+      # It then uses 'jq' to escape it as a single-line JSON string
+      - name: Get last commit diff
+        id: get_diff
+        run: |
+          echo "DIFF_JSON=$(git diff HEAD~1 HEAD | jq -sR .)" >> $GITHUB_OUTPUT
+
+      # 3. Call the Gemini API for suggestions
+      - name: Call Gemini API
+        id: gemini_call
+        run: |
+          # The API URL for Gemini 2.5 Flash
+          API_URL="[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$){{ secrets.GEMINI_API_KEY }}"
+          
+          # Get the escaped diff content from the previous step
+          DIFF_CONTENT=${{ steps.get_diff.outputs.DIFF_JSON }}
+          
+          # Get the short hash of the commit for the title
+          COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
+
+          # Create the JSON payload for the Gemini API
+          # We give it a "systemInstruction" to act like an expert reviewer
+          # We then pass the diff in the user prompt
+          JSON_PAYLOAD=$(cat <<EOF
+          {
+            "systemInstruction": {
+              "parts": [{
+                "text": "You are an expert senior software developer and product manager. Analyze the following 'git diff' from a new commit. Your goal is to find opportunities for new features, code improvements, or potential bugs.
+                
+                - Provide 2-3 concise, actionable suggestions.
+                - Format your response as a clean markdown list.
+                - If the commit is minor (e.g., a typo fix, formatting, updating comments), just respond with the single phrase: 'No suggestions for this minor update.'"
+              }]
+            },
+            "contents": [{
+              "parts": [{
+                "text": "Analyze this git diff from commit ${COMMIT_SHA_SHORT}:\n\n${DIFF_CONTENT}"
+              }]
+            }]
+          }
+          EOF
+          )
+
+          # Make the API call with curl and save the JSON response
+          # We use 'jq' to parse the response and extract just the text content
+          # If parsing fails, it provides a fallback error message
+          API_RESPONSE_TEXT=$(curl -s -X POST -H "Content-Type: application/json" -d "${JSON_PAYLOAD}" "${API_URL}" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not parse AI response."')
+          
+          # Save the AI's suggestions to a GitHub output variable
+          # This 'EOF' method handles multi-line strings safely
+          echo "SUGGESTIONS<<EOF" >> $GITHUB_OUTPUT
+          echo "$API_RESPONSE_TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 4. Create the new GitHub Issue
+      - name: Create GitHub Issue with Suggestions
+        # This 'if' condition is important: it PREVENTS spam.
+        # It will only run if the AI response is NOT the "minor update" message.
+        if: steps.gemini_call.outputs.SUGGESTIONS != 'No suggestions for this minor update.'
+        env:
+          # The GITHUB_TOKEN is automatically provided by GitHub Actions
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: $(git rev-parse --short HEAD)
+          SUGGESTIONS: ${{ steps.gemini_call.outputs.SUGGESTIONS }}
+        run: |
+          gh issue create \
+            --title "AI Suggestions for commit ${{ env.COMMIT_SHA }}" \
+            --body "Our AI bot analyzed commit \`${{ env.COMMIT_SHA }}\` and has the following suggestions:
+            
+            ---
+            
+            ${{ env.SUGGESTIONS }}" \
+            --label "ai-suggestion,needs-review"
