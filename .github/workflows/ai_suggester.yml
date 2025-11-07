@@ -1,8 +1,12 @@
 # AI Commit Analyzer & Issue Suggester
 # Author: Mosses
-# Version: 1.0.4
+# Version: 1.0.5
 #
 # Changelog:
+# v1.0.5 - Fix "unexpected EOF" error by correctly passing the commit SHA
+#          between steps using GITHUB_OUTPUT, instead of trying to
+#          execute a shell command inside an 'env:' block.
+#        - Clean up 'get_diff' step to use GITHUB_OUTPUT delimiter correctly.
 # v1.0.4 - The definitive fix. Moved the multiline SYSTEM_PROMPT to an 'env:' block
 #          to resolve the YAML parser conflict with the 'run:' block.
 # v1.0.3 - Failed attempt to fix shell error using 'cat <<EOF' inline.
@@ -15,6 +19,8 @@ on:
   push:
     branches:
       - main
+  # Add this trigger to test manually from the "Actions" tab
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -34,6 +40,8 @@ jobs:
       - name: Get last commit diff
         id: get_diff
         run: |
+          # Use the GITHUB_OUTPUT multiline string format
+          # This is the robust way to do this.
           echo "RAW_DIFF<<EOF" >> $GITHUB_OUTPUT
           git diff HEAD~1 HEAD >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -41,12 +49,10 @@ jobs:
       # 3. Call the Gemini API for suggestions
       - name: Call Gemini API
         id: gemini_call
-        # We define the large multiline string in the 'env' block.
-        # This is the correct way to handle it in GitHub Actions.
         env:
           SYSTEM_PROMPT: |
             You are an expert senior software developer and product manager. Analyze the following 'git diff' from a new commit. Your goal is to find opportunities for new features, code improvements, or potential bugs.
-                            
+            
             - Provide 2-3 concise, actionable suggestions.
             - Format your response as a clean markdown list.
             - If the commit is minor (e.g., a typo fix, formatting, updating comments), just respond with the single phrase: 'No suggestions for this minor update.'
@@ -61,8 +67,6 @@ jobs:
           COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
 
           # Create the JSON payload for the Gemini API
-          # We use 'jq' to safely construct the JSON.
-          # The $SYSTEM_PROMPT variable is now safely provided by the 'env:' block.
           JSON_PAYLOAD=$(jq -n \
             --arg sp "$SYSTEM_PROMPT" \
             --arg commit_sha "$COMMIT_SHA_SHORT" \
@@ -81,19 +85,26 @@ jobs:
           echo "$API_RESPONSE_TEXT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+          # ***FIX***: Save the commit SHA for the next step
+          echo "COMMIT_SHA_SHORT=$COMMIT_SHA_SHORT" >> $GITHUB_OUTPUT
+
       # 4. Create the new GitHub Issue
       - name: Create GitHub Issue with Suggestions
+        # This 'if' condition is correct
         if: steps.gemini_call.outputs.SUGGESTIONS != 'No suggestions for this minor update.'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COMMIT_SHA: $(git rev-parse --short HEAD)
+          # ***FIX***: Read the values from the previous step's outputs
+          # Do not run shell commands in the 'env:' block
+          COMMIT_SHA: ${{ steps.gemini_call.outputs.COMMIT_SHA_SHORT }}
           SUGGESTIONS: ${{ steps.gemini_call.outputs.SUGGESTIONS }}
         run: |
+          # The env variables are now correctly populated before this 'run' block starts
           gh issue create \
-            --title "AI Suggestions for commit ${{ env.COMMIT_SHA }}" \
-            --body "Our AI bot analyzed commit \`${{ env.COMMIT_SHA }}\` and has the following suggestions:
+            --title "AI Suggestions for commit ${COMMIT_SHA}" \
+            --body "Our AI bot analyzed commit \`${COMMIT_SHA}\` and has the following suggestions:
             
             ---
             
-            ${{ env.SUGGESTIONS }}" \
+            ${SUGGESTIONS}" \
             --label "ai-suggestion,needs-review"
