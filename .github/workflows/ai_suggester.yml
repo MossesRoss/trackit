@@ -7,7 +7,6 @@
 #          preventing the shell from interpreting shell syntax inside the git diff.
 # v1.0.1 - Fix shell 'bad substitution' error by correcting API_URL syntax.
 # v1.0.0 - Initial creation.
-
 name: AI Commit Analyzer
 
 on:
