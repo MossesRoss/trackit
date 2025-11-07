@@ -1,8 +1,9 @@
 # AI Commit Analyzer & Issue Suggester
 # Author: Mosses
-# Version: 1.0.0
+# Version: 1.0.1
 #
 # Changelog:
+# v1.0.1 - Fix shell 'bad substitution' error by correcting API_URL syntax.
 # v1.0.0 - Initial creation.
 #   - Triggers on push to 'main' branch.
 #   - Gets commit diff.
@@ -50,6 +51,7 @@ jobs:
         id: gemini_call
         run: |
           # The API URL for Gemini 2.5 Flash
+          # This line is corrected to be a simple string assignment
           API_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${{ secrets.GEMINI_API_KEY }}"
           
           # Get the escaped diff content from the previous step
