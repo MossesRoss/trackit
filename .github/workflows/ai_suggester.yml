@@ -50,7 +50,7 @@ jobs:
         id: gemini_call
         run: |
           # The API URL for Gemini 2.5 Flash
-          API_URL="[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$){{ secrets.GEMINI_API_KEY }}"
+          API_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${{ secrets.GEMINI_API_KEY }}"
           
           # Get the escaped diff content from the previous step
           DIFF_CONTENT=${{ steps.get_diff.outputs.DIFF_JSON }}
