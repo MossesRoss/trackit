@@ -1,10 +1,11 @@
 # AI Commit Analyzer & Issue Suggester
 # Author: Mosses
-# Version: 1.0.3
+# Version: 1.0.4
 #
 # Changelog:
-# v1.0.3 - Fix shell error caused by interpreting multiline SYSTEM_PROMPT.
-#          Use 'cat <<EOF' to safely assign the multiline string.
+# v1.0.4 - The definitive fix. Moved the multiline SYSTEM_PROMPT to an 'env:' block
+#          to resolve the YAML parser conflict with the 'run:' block.
+# v1.0.3 - Failed attempt to fix shell error using 'cat <<EOF' inline.
 # v1.0.2 - Fix "bad substitution" double-expansion error by using 'jq'.
 # v1.0.1 - Fix shell 'bad substitution' error by correcting API_URL syntax.
 # v1.0.0 - Initial creation.
@@ -30,7 +31,6 @@ jobs:
           fetch-depth: 2
 
       # 2. Get the raw diff of the last commit
-      # We output the raw diff string to a multiline output
       - name: Get last commit diff
         id: get_diff
         run: |
@@ -41,6 +41,15 @@ jobs:
       # 3. Call the Gemini API for suggestions
       - name: Call Gemini API
         id: gemini_call
+        # We define the large multiline string in the 'env' block.
+        # This is the correct way to handle it in GitHub Actions.
+        env:
+          SYSTEM_PROMPT: |
+            You are an expert senior software developer and product manager. Analyze the following 'git diff' from a new commit. Your goal is to find opportunities for new features, code improvements, or potential bugs.
+                            
+            - Provide 2-3 concise, actionable suggestions.
+            - Format your response as a clean markdown list.
+            - If the commit is minor (e.g., a typo fix, formatting, updating comments), just respond with the single phrase: 'No suggestions for this minor update.'
         run: |
           # The API URL for Gemini 2.5 Flash
           API_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${{ secrets.GEMINI_API_KEY }}"
@@ -51,20 +60,9 @@ jobs:
           # Get the short hash of the commit for the title
           COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
 
-          # Define the system prompt in a variable using 'cat <<EOF'
-          # This is the safest way to assign a multiline string in shell.
-          # The 'EOF' is quoted to prevent any shell expansion inside the prompt.
-          SYSTEM_PROMPT=$(cat <<'EOF'
-You are an expert senior software developer and product manager. Analyze the following 'git diff' from a new commit. Your goal is to find opportunities for new features, code improvements, or potential bugs.
-                
-- Provide 2-3 concise, actionable suggestions.
-- Format your response as a clean markdown list.
-- If the commit is minor (e.g., a typo fix, formatting, updating comments), just respond with the single phrase: 'No suggestions for this minor update.'
-EOF
-)
-
           # Create the JSON payload for the Gemini API
           # We use 'jq' to safely construct the JSON.
+          # The $SYSTEM_PROMPT variable is now safely provided by the 'env:' block.
           JSON_PAYLOAD=$(jq -n \
             --arg sp "$SYSTEM_PROMPT" \
             --arg commit_sha "$COMMIT_SHA_SHORT" \
