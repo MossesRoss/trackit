@@ -73,7 +73,7 @@ jobs:
             --arg raw_diff "$RAW_DIFF_CONTENT" \
             '{
               "systemInstruction": { "parts": [{"text": $sp}] },
-              "contents": [ { "parts": [{"text": "Analyze this git diff from commit \($commit_sha):\n\n\($raw_diff)"}] } ]
+              "contents": [ { "parts": [{"text": "Analyze this git diff from commit \\($commit_sha):\n\n\\($raw_diff)"}] } ]
             }'
           )
 
