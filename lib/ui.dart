@@ -1,23 +1,23 @@
 /*
  * @author Mosses
- * @version 1.4.5
+ * @version 1.5.0
  * --- CHANGELOG ---
+ * v1.5.0:
+ * - [FEAT] Implemented milestone sorting on Milestones page.
+ * - [FIX] The first incomplete (current) milestone is now always displayed 
+ * at the top of the list.
+ * - [FIX] All completed milestones are now moved to the bottom of the list.
+ * - [FIX] This change also fixes a visual bug where un-completing a
+ * task would leave subsequent milestones seemingly unlocked. The UI
+ * now correctly reflects the `isUnlocked` state by re-sorting the list.
  * v1.4.5:
  * - [FIX] Wrapped MilestoneNode in IntrinsicHeight to resolve RenderFlex layout crash.
  * - [FIX] Added `as ui` prefix to `dart:ui` import to fix TextDirection.ltr name collision.
- * v1.4.4:
- * - [FIX] Added explicit `dart:ui` import to resolve `TextDirection` error.
- * v1.4.3:
- * - [FIX] Resolved visual bug where milestone timeline would disconnect
- * or render incorrectly when expanding/collapsing cards.
- * - [REFACTOR] Moved timeline dot and icon painting into `LinePainter`.
- * v1.4.2:
  */
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui; // <-- FIX: Added 'as ui' prefix
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-// import 'package:flutter/foundation.dart' show debugPrint; // FIX: Unnecessary import
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -593,6 +593,41 @@ class MilestonesPageState extends State<MilestonesPage>
     // --- FIX: Get line color from theme ---
     final Color lineColor = Theme.of(context).dividerColor;
 
+    // --- FIX: Sorting logic ---
+    List<Milestone> sortedMilestones = [];
+    if (widget.activeGoal != null && widget.activeGoal!.milestones.isNotEmpty) {
+      final milestones = widget.activeGoal!.milestones;
+
+      List<Milestone> completed = [];
+      List<Milestone> upcoming = [];
+      Milestone? currentMilestone;
+
+      // Find the first incomplete milestone
+      try {
+        currentMilestone = milestones.firstWhere((m) => !m.isCompleted);
+      } catch (e) {
+        currentMilestone = null;
+      }
+
+      // Separate lists
+      for (final milestone in milestones) {
+        if (milestone.isCompleted) {
+          completed.add(milestone);
+        } else {
+          // Add current milestone to the front of upcoming
+          if (currentMilestone != null && milestone.id == currentMilestone.id) {
+            upcoming.insert(0, milestone);
+          } else {
+            upcoming.add(milestone);
+          }
+        }
+      }
+      
+      // Combine lists
+      sortedMilestones = upcoming + completed;
+    }
+    // --- End of fix ---
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Milestones'),
@@ -628,17 +663,21 @@ class MilestonesPageState extends State<MilestonesPage>
                 )
               : ListView.builder(
                   padding: const EdgeInsets.all(16.0),
-                  itemCount: widget.activeGoal!.milestones.length,
+                  // --- FIX: Use sorted list ---
+                  itemCount: sortedMilestones.length,
                   itemBuilder: (context, index) {
-                    final milestone = widget.activeGoal!.milestones[index];
+                    final milestone = sortedMilestones[index];
+                    // --- End of fix ---
+
                     // --- FIX: Wrap in IntrinsicHeight to solve layout crash ---
                     return IntrinsicHeight(
                       child: MilestoneNode(
                         key: ValueKey('${milestone.id}-${milestone.progress}'),
                         milestone: milestone,
+                        // --- FIX: Use sorted list for first/last ---
                         isFirst: index == 0,
-                        isLast:
-                            index == widget.activeGoal!.milestones.length - 1,
+                        isLast: index == sortedMilestones.length - 1,
+                        // --- End of fix ---
                         onToggleCheckpoint: widget.onToggleCheckpoint,
                         onDelete: () => widget.onDeleteMilestone(milestone.id),
                         editMode: widget.editMode,
@@ -822,7 +861,7 @@ class GetInTouchPage extends StatelessWidget {
                 title: const Text("Donate"),
                 subtitle: const Text("Support the development"),
                 onTap: () => _launchURL(
-                    "https://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing"),
+                    "httpshttps://drive.google.com/file/d/1b2s0u5msfpqn7finiw8Vx1ELgbWUrbW9/view?usp=sharing"),
               ),
             ),
             Card(
@@ -831,7 +870,7 @@ class GetInTouchPage extends StatelessWidget {
                 title: const Text("Contribute"),
                 subtitle: const Text("Help improve the app on GitHub"),
                 onTap: () => _launchURL(
-                    "https://github.com/MossesRoss/trackit/edit/main/main.dart"),
+                    "httpshttps://github.com/MossesRoss/trackit/edit/main/main.dart"),
               ),
             ),
           ],

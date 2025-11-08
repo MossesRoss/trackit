@@ -1,7 +1,14 @@
 /*
  * @author Mosses
- * @version 1.7.0
+ * @version 1.7.1
  * --- CHANGELOG ---
+ * v1.7.1:
+ * - [FIX] `onPressed` in check-in dialog is now `async` to properly `await`
+ * the `toggleCheckpointByIds` call.
+ * - [FIX] Changed `Color` type to `MaterialColor` to access `.shade700`
+ * (This was a comment from your original code, kept for history)
+ * - [FIX] Removed extra closing brace `}` at end of file.
+ * - [STYLE] Changed dialog `TextButton` to `FilledButton` for a solid look.
  * v1.7.0:
  * - [FEAT] Redesigned check-in dialog per user feedback.
  * - [STYLE] Title is now the task name.
@@ -42,7 +49,7 @@ import './notification_service.dart';
 // --- Keys for SharedPreferences Timer Recovery ---
 const String kRecoveryTimeKey = 'recovery_time_seconds';
 const String kRecoveryMilestoneKey = 'recovery_milestone_id';
-// --- Key for Firestore Local Cache (Old key, now only used for migration) ---
+// is this safe to remove?
 const String _oldLocalCacheKey = 'all_goals_cache';
 // --- Key for Theme Persistence ---
 const String _kThemePersistenceKey = 'theme_mode';
@@ -1043,25 +1050,23 @@ class _MainPageState extends State<MainPage> {
     String checkpointId, {
     bool toggle = false,
   }) {
-    /*
-     * @author Mosses
-     * @version 1.7.1
-     * --- CHANGELOG ---
-     * v1.7.1:
-     * - [FIX] Changed `Color` type to `MaterialColor` to access `.shade700`
-     */
-    return TextButton(
-      style: TextButton.styleFrom(
-        backgroundColor: color.withOpacity(0.12), // Subtle background
-        foregroundColor: color.shade700, // Darker text for readability
+    // --- MOSSES: CHANGED TextButton to FilledButton ---
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: color.shade100, // Light background
+        foregroundColor: color.shade900, // Dark text
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8), // Softer corners
+          borderRadius: BorderRadius.circular(12), // Softer corners
         ),
         // Make the buttons a bit taller to fill the 2x2 grid
         padding: const EdgeInsets.symmetric(vertical: 16.0),
+      ).copyWith(
+        // Use .copyWith to override overlay color for a nice press effect
+        overlayColor: MaterialStateProperty.all(color.shade200),
       ),
       child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold)),
-      onPressed: () {
+      // --- MOSSES: FIX: Added async/await ---
+      onPressed: () async {
         Navigator.of(dialogContext).pop(); // Close dialog
 
         // Run the original foreground logic
@@ -1069,7 +1074,7 @@ class _MainPageState extends State<MainPage> {
         recordTaskCheckin(goalId, milestoneId, checkpointId, status);
         if (toggle) {
           // Use `await` to ensure it completes
-          toggleCheckpointByIds(goalId, milestoneId, checkpointId);
+          await toggleCheckpointByIds(goalId, milestoneId, checkpointId);
         }
       },
     );

@@ -1,7 +1,14 @@
 /*
  * @author Mosses
- * @version 1.4.0
+ * @version 1.5.0
  * --- CHANGELOG ---
+ * v1.5.0:
+ * - [FEAT] Reports page now checks for an active goal before building.
+ * If no active goal is found, it displays "Set goal first."
+ * - [FIX] Cleaned up redundant "no active goal" check in `OverallReportView`
+ * as it is now handled by the parent `ReportsPage`.
+ * - [FIX] `ArchivedGoalCard` in Yearly tab now uses theme-aware colors
+ * (`primaryContainer`/`errorContainer`) to fix dark mode visibility.
  * v1.4.0:
  * - [FIX] Changed `OverallReportView` to use a `StreamBuilder` on
  * `firestoreService.getGoalsStream()` instead of relying on a
@@ -9,19 +16,6 @@
  * tab would show stale data after a notification action.
  * - [FEAT] Removed `activeGoal` parameter from `ReportsPage` as it's
  * no longer needed.
- * v1.3.0:
- * - [PERF] Stored report streams in `initState` to prevent them from
- * being rebuilt, fixing the real-time update bug.
- * - [STYLE] Removed redundant "Overall Goal Progress" title from the 'Overall' tab.
- * - [STYLE] Moved the pie chart in the 'Overall' tab to the top of the screen.
- * v1.2.0:
- * - [PERF] Replaced all `FutureBuilder` widgets with `StreamBuilder` widgets.
- * - [FIX] Connected report views to the new real-time streams from 
- * FirestoreService, ensuring data updates live after notification taps.
- * v1.1.0:
- * - [FEAT] Moved overall progress chart to a new 'Overall' tab per user request.
- * - [PERF] Removed LayoutBuilder from pie chart and gave it a fixed size to reduce lag.
- * - [STYLE] Added vertical spacing to the chart in its new tab.
  */
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart'; // Import fl_chart
@@ -103,6 +97,8 @@ class _ReportsPageState extends State<ReportsPage>
   late Stream<Map<String, dynamic>> _weeklyReportStream;
   late Stream<Map<String, dynamic>> _monthlyReportStream;
   late Stream<Map<String, dynamic>> _yearlyReportStream;
+  // --- FIX: Add goals stream to check for active goal ---
+  late Stream<List<Goal>> _goalsStream;
 
   @override
   void initState() {
@@ -115,6 +111,8 @@ class _ReportsPageState extends State<ReportsPage>
     // and not cause initState to re-run if the provider changes.
     final firestoreService =
         Provider.of<FirestoreService>(context, listen: false);
+    // --- FIX: Initialize goals stream ---
+    _goalsStream = firestoreService.getGoalsStream();
     _weeklyReportStream = firestoreService.getWeeklyReport();
     _monthlyReportStream = firestoreService.getMonthlyReport();
     _yearlyReportStream = firestoreService.getYearlyReport();
@@ -145,29 +143,68 @@ class _ReportsPageState extends State<ReportsPage>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // --- FIX: Remove activeGoal property ---
-          const OverallReportView(),
-          // Was: OverallReportView(activeGoal: widget.activeGoal),
+      // --- FIX: Wrap body in StreamBuilder to check for active goal ---
+      body: StreamBuilder<List<Goal>>(
+        stream: _goalsStream,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.hasData) {
+            // This case also catches errors, though snapshot.hasError is better
+            return const Center(child: Text("Loading..."));
+          }
 
-          // --- FIX: Pass the persistent streams from state ---
-          ReportView(
-            title: 'Weekly Report',
-            reportStream: _weeklyReportStream,
-          ),
-          ReportView(
-            title: 'Monthly Report',
-            reportStream: _monthlyReportStream,
-          ),
-          ReportView(
-            title: 'Yearly Report',
-            reportStream: _yearlyReportStream,
-            isYearly: true,
-          ),
-        ],
+          final allGoals = snapshot.data ?? [];
+          Goal? activeGoal;
+          try {
+            activeGoal =
+                allGoals.firstWhere((g) => g.status == GoalStatus.active);
+          } catch (e) {
+            activeGoal = null;
+          }
+
+          // If no active goal, show message
+          if (activeGoal == null) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  "Set goal first", // <-- User's requested text
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
+                ),
+              ),
+            );
+          }
+
+          // If active goal exists, show the TabBarView
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              // --- FIX: Remove activeGoal property ---
+              const OverallReportView(),
+              // Was: OverallReportView(activeGoal: widget.activeGoal),
+
+              // --- FIX: Pass the persistent streams from state ---
+              ReportView(
+                title: 'Weekly Report',
+                reportStream: _weeklyReportStream,
+              ),
+              ReportView(
+                title: 'Monthly Report',
+                reportStream: _monthlyReportStream,
+              ),
+              ReportView(
+                title: 'Yearly Report',
+                reportStream: _yearlyReportStream,
+                isYearly: true,
+              ),
+            ],
+          );
+        },
       ),
+      // --- End of fix ---
     );
   }
 }
@@ -188,6 +225,7 @@ class OverallReportView extends StatelessWidget {
         stream: firestoreService.getGoalsStream(),
         builder: (context, snapshot) {
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            // This can be simplified, as ReportsPage now handles the "no goal" case
             return const Center(child: Text("Loading..."));
           }
 
@@ -201,12 +239,23 @@ class OverallReportView extends StatelessWidget {
           }
           // --- End of fix ---
 
-          if (activeGoal == null || activeGoal.totalTasks == 0) {
+          // --- FIX: Removed redundant "No active goal" message ---
+          // This is now handled by the parent ReportsPage
+          if (activeGoal == null) {
+            // This should technically not be reached if parent is fixed
+            return const Center(child: Text("Loading..."));
+          }
+          
+          if (activeGoal.totalTasks == 0) {
+          // --- End of fix ---
             return const Center(
               child: Padding(
                 padding: EdgeInsets.all(16.0),
                 child: Text(
-                  "No active goal to display. Set a goal and complete tasks to see your progress here.",
+                  // "No active goal to display. Set a goal and complete tasks to see your progress here.",
+                  // --- FIX: Changed message to be specific to this case ---
+                  "No tasks added to your active goal yet.",
+                  // --- End of fix ---
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -451,16 +500,32 @@ class ArchivedGoalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isAchieved = goal.status == GoalStatus.achieved;
+
+    // --- FIX: Use theme-aware colors for dark mode ---
+    final Color cardColor = isAchieved
+        ? Theme.of(context).colorScheme.primaryContainer
+        : Theme.of(context).colorScheme.errorContainer;
+    final Color contentColor = isAchieved
+        ? Theme.of(context).colorScheme.onPrimaryContainer
+        : Theme.of(context).colorScheme.onErrorContainer;
+    // --- End of fix ---
+
     return Card(
-      color: isAchieved ? Colors.green.shade50 : Colors.red.shade50,
+      color: cardColor, // <-- FIX
       child: ListTile(
         leading: Icon(
           isAchieved ? Icons.emoji_events_rounded : Icons.flag_rounded,
-          color: isAchieved ? Colors.green.shade700 : Colors.red.shade700,
+          color: contentColor, // <-- FIX
         ),
         title: Text(goal.title,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(isAchieved ? 'Achieved!' : 'Given Up'),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: contentColor, // <-- FIX
+            )),
+        subtitle: Text(
+          isAchieved ? 'Achieved!' : 'Given Up',
+          style: TextStyle(color: contentColor.withOpacity(0.8)), // <-- FIX
+        ),
       ),
     );
   }

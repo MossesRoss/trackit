@@ -12,8 +12,8 @@
  * - [FEAT] Includes clear UPI payment instructions with copy-to-clipboard actions.
  */
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For Clipboard
-import 'package:url_launcher/url_launcher.dart'; // For launching URLs
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class UpgradePage extends StatefulWidget {
   const UpgradePage({super.key});

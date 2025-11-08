@@ -47,7 +47,7 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
   final List<Goal> allGoals = (params['goals'] as List<dynamic>)
       .map((g) => Goal.fromJson(g as Map<String, dynamic>))
       .toList();
-final DateTime start = params['start'] as DateTime;
+  final DateTime start = params['start'] as DateTime;
   final DateTime end = params['end'] as DateTime;
 
   Duration totalTime = Duration.zero;
@@ -199,9 +199,11 @@ class FirestoreService {
   Future<void> archiveGoal(Goal goal) async {
     if (uid == null) return;
     // --- FIX: Save to user-specific subcollection ---
-    final archiveDoc =
-        _db.collection('users').doc(uid).collection('archived_goals').doc(
-            goal.id);
+    final archiveDoc = _db
+        .collection('users')
+        .doc(uid)
+        .collection('archived_goals')
+        .doc(goal.id);
     goal.isArchived = true;
     await archiveDoc.set(goal.toJson());
   }
@@ -234,8 +236,7 @@ class FirestoreService {
     // --- FIX: Don't cache if UID is null (e.g., logged out) ---
     if (uid == null) return;
     final prefs = await SharedPreferences.getInstance();
-    final String goalsJson =
-        json.encode(goals.map((g) => g.toJson()).toList());
+    final String goalsJson = json.encode(goals.map((g) => g.toJson()).toList());
     // --- FIX: Use user-specific cache key ---
     await prefs.setString(_userCacheKey, goalsJson);
   }
@@ -255,7 +256,8 @@ class FirestoreService {
 
     // No local cache found for this user, fetch from Firestore
     // (uid is guaranteed to be non-null here)
-    final goalsCollection = _db.collection('users').doc(uid).collection('goals');
+    final goalsCollection =
+        _db.collection('users').doc(uid).collection('goals');
     final snapshot = await goalsCollection.get();
     final goals =
         snapshot.docs.map((doc) => Goal.fromJson(doc.data())).toList();
@@ -276,7 +278,8 @@ class FirestoreService {
       debugPrint("getGoalsStream: No UID, returning empty stream.");
       return Stream.value([]);
     }
-    final goalsCollection = _db.collection('users').doc(uid).collection('goals');
+    final goalsCollection =
+        _db.collection('users').doc(uid).collection('goals');
     return goalsCollection.snapshots().map((snapshot) {
       debugPrint("getGoalsStream: Received new goals snapshot.");
       final goals =
@@ -404,11 +407,10 @@ class FirestoreService {
         querySnapshot,
       ]);
 
-      final archivedGoals =
-          (results[2] as QuerySnapshot<Map<String, dynamic>>)
-              .docs
-              .map((doc) => Goal.fromJson(doc.data()))
-              .toList();
+      final archivedGoals = (results[2] as QuerySnapshot<Map<String, dynamic>>)
+          .docs
+          .map((doc) => Goal.fromJson(doc.data()))
+          .toList();
 
       debugPrint("getYearlyReport: Processing complete.");
       return {
@@ -419,37 +421,24 @@ class FirestoreService {
     });
   }
 }
-// --- End of fix ---
 
-// --- FIX: Add this missing class ---
 class SuggestionResult {
   final String? suggestion;
-  final String? error; // e.g., "NO_API_KEY", "API_ERROR", "NETWORK_ERROR"
+  final String? error;
 
   SuggestionResult({this.suggestion, this.error});
 }
-// --- End of fix ---
 
-// --- Suggestion Service (Unchanged) ---
 class SuggestionService {
-  // =======================================================================
-  // CRITICAL ACTION: Paste your Google Apps Script Web App URL here.
-  // =======================================================================
-  static const String _appsScriptUrl =
-      "httpsGive_Me_A_Link";
-  // =======================================================================
+  static const String _appsScriptUrl = String.fromEnvironment(
+    'APPS_SCRIPT_URL',
+    defaultValue: 'https://placeholder.com/error', // A fallback
+  );
 
   /// Calls the Google Apps Script backend proxy.
   /// This is the new single point of contact for all AI features.
   static Future<SuggestionResult> _callAppsScript(
       String action, Map<String, dynamic> body) async {
-    // Check if the developer has set the URL.
-    if (_appsScriptUrl.contains("PASTE_YOUR_DEPLOYED_WEB_APP_URL_HERE")) {
-      debugPrint("CRITICAL: _appsScriptUrl is not set in services.dart.");
-      // Return the "NO_API_KEY" error so the UI can display a helpful message.
-      return SuggestionResult(error: "NO_API_KEY");
-    }
-
     // Add the specific action to the request body
     body['action'] = action;
 
