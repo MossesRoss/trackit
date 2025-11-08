@@ -1,4 +1,4 @@
-package com.example.trackit
+package com.mosses.trackit
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine

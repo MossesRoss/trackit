@@ -1,27 +1,18 @@
 /*
  * @author Mosses
- * @version 1.4.1
+ * @version 1.4.3
  * --- CHANGELOG ---
- * v1.4.1:
- * - [FIX] Modified `archiveGoal` to save to a user-specific subcollection
- * (`users/{uid}/archived_goals`) instead of a root collection, to
- * respect Firestore security rules.
- * - [FIX] Updated `getYearlyReport` to query the new
- * `users/{uid}/archived_goals` subcollection, fixing the
- * [cloud_firestore/permission-denied] error.
- * - [PERF] Removed redundant `where('userId', ...)` query from `getYearlyReport`
- * as it's now implied by the collection path.
- * v1.4.0:
- * - [FIX] Updated `_processPeriodData` background task to iterate
- * through the new `milestone.timeLog` list. It now correctly
- * sums *only* the session durations that fall within the
- * report's date range, fixing the inaccurate time bug.
- * - [FIX] Removed the old logic that checked `lastWorkedOn` and
- * added the total `milestone.timeSpent`.
- * - [FIX] Truncated `startOfWeek` in `getWeeklyReport` to 00:00:00
- * to fix the bug where the weekly report showed "0" on Mondays.
- * - [FIX] Adjusted `endOfWeek` to add 7 full days, making the
- * `isBefore(end)` check correct for the whole week.
+ * v1.4.3:
+ * - [FEAT] Changed all AI-related error handling in `_callAppsScript` to
+ * return a user-friendly "Upgrade to Pro..." message instead of
+ * a technical error.
+ * - [FEAT] Updated `getMonthlyReportSummary` fallback to also show the
+ * "Upgrade to Pro" message.
+ * v1.4.2:
+ * - [FIX] Added `_RedirectingClient` class to handle HTTP 302 redirects from
+ * Google Apps Script.
+ * - [FIX] Updated `SuggestionService._callAppsScript` to use the new
+ * `_RedirectingClient`, which should resolve network errors.
  */
 
 import 'dart:convert';
@@ -37,6 +28,26 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import './models.dart';
 import './notification_service.dart'; // Import the new service
+import 'dart:async'; // --- ADDED for redirect client ---
+
+// --- NEW: This is the fix for the HTTP 302 Redirect Error ---
+// This class wraps the default HTTP client and tells it to follow
+// redirects even for POST requests.
+class _RedirectingClient extends http.BaseClient {
+  final http.Client _inner;
+  _RedirectingClient(this._inner);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    // For POST requests, manually set followRedirects to true.
+    if (request.method == 'POST') {
+      request.followRedirects = true;
+      request.maxRedirects = 5; // Set a reasonable limit
+    }
+    return _inner.send(request);
+  }
+}
+// --- End of new class ---
 
 // =======================================================================
 // TOP-LEVEL FUNCTION FOR BACKGROUND REPORT PROCESSING
@@ -430,10 +441,17 @@ class SuggestionResult {
 }
 
 class SuggestionService {
+  // --- NEW: Create an instance of the redirecting client ---
+  static final http.Client _client = _RedirectingClient(http.Client());
+
   static const String _appsScriptUrl = String.fromEnvironment(
     'APPS_SCRIPT_URL',
     defaultValue: 'https://placeholder.com/error', // A fallback
   );
+
+  // --- NEW: Define the user-facing error message ---
+  static const String _proMessage =
+      "Upgrade to Pro to enjoy AI features and more";
 
   /// Calls the Google Apps Script backend proxy.
   /// This is the new single point of contact for all AI features.
@@ -447,7 +465,8 @@ class SuggestionService {
     final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
 
     try {
-      final response = await http.post(
+      // --- FIX: Use `_client.post` instead of `http.post` ---
+      final response = await _client.post(
         Uri.parse(_appsScriptUrl),
         headers: {
           'Content-Type': 'application/json',
@@ -460,19 +479,22 @@ class SuggestionService {
         final data = json.decode(response.body);
         if (data['error'] != null) {
           debugPrint("Google Apps Script Error: ${data['error']}");
-          return SuggestionResult(error: data['error']);
+          // --- UPDATED: Return pro message ---
+          return SuggestionResult(error: _proMessage);
         }
         return SuggestionResult(suggestion: data['suggestion']);
       } else {
         // Handle non-200 HTTP responses
         debugPrint(
             "Apps Script HTTP Error ${response.statusCode}: ${response.body}");
-        return SuggestionResult(error: "HTTP_ERROR_${response.statusCode}");
+        // --- UPDATED: Return pro message ---
+        return SuggestionResult(error: _proMessage);
       }
     } catch (e) {
       // Handle network or connection errors
       debugPrint("Apps Script connection error: $e");
-      return SuggestionResult(error: "NETWORK_ERROR");
+      // --- UPDATED: Return pro message ---
+      return SuggestionResult(error: _proMessage);
     }
   }
 
@@ -535,7 +557,11 @@ class SuggestionService {
       'previousData': previousData,
     });
 
-    return result.suggestion ?? "Could not generate summary at this time.";
+    // --- UPDATED: Check for error and return it, or return fallback ---
+    if (result.error != null) {
+      return result.error!;
+    }
+    return result.suggestion ?? _proMessage;
   }
 }
 
