@@ -1,18 +1,18 @@
 /*
  * @author Mosses
- * @version 1.5.0
+ * @version 1.5.3
  * --- CHANGELOG ---
- * v1.5.0:
- * - [FEAT] Implemented milestone sorting on Milestones page.
- * - [FIX] The first incomplete (current) milestone is now always displayed 
- * at the top of the list.
- * - [FIX] All completed milestones are now moved to the bottom of the list.
- * - [FIX] This change also fixes a visual bug where un-completing a
- * task would leave subsequent milestones seemingly unlocked. The UI
- * now correctly reflects the `isUnlocked` state by re-sorting the list.
- * v1.4.5:
- * - [FIX] Wrapped MilestoneNode in IntrinsicHeight to resolve RenderFlex layout crash.
- * - [FIX] Added `as ui` prefix to `dart:ui` import to fix TextDirection.ltr name collision.
+ * v1.5.3:
+ * - [FIX] Wrapped AddMilestoneForm in a SingleChildScrollView to prevent keyboard overflow.
+ * v1.5.2:
+ * - [FIX] Wrapped HomePage body in a SingleChildScrollView to guarantee no overflow.
+ * - [FEAT] Added portrait/landscape layout switching on HomePage.
+ * - [FEAT] Landscape mode now uses a Row (timer on left, suggestion on right).
+ * - [FIX] Removed Spacer from portrait Column to work correctly with scrolling.
+ * v1.5.1:
+ * - [FIX] Implemented responsive layout on HomePage to fix landscape overflow.
+ * - [FEAT] Added OrientationBuilder to adjust timer size and spacing.
+ * - [FEAT] GoalTimerCircle now accepts a `size` parameter for responsiveness.
  */
 import 'dart:async';
 import 'dart:convert';
@@ -159,6 +159,83 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // --- NEW HELPER WIDGET for responsive layout ---
+  Widget _buildGoalDisplay(
+      bool isPortrait, double timerSize, double spacerHeight) {
+    // 1. Handle empty/completed goals first
+    if (widget.activeGoal!.milestones.isEmpty) {
+      return const Center(
+        child: Text(
+          "Goal set! Go to the Milestones page to add your first task.",
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
+        ),
+      );
+    }
+    if (_nextMilestone == null) {
+      return const Center(
+        child: Text(
+          "All milestones complete! 🎉",
+          style: TextStyle(fontSize: 18),
+        ),
+      );
+    }
+
+    // 2. Build the individual components
+    final Widget timerWidget = GoalTimerCircle(
+      key: ValueKey(widget.activeGoal!.totalTimeSpent.inSeconds),
+      goal: widget.activeGoal!,
+      nextMilestone: _nextMilestone!,
+      onTimeAdd: widget.onTimeAdd,
+      size: timerSize,
+    );
+
+    final Widget suggestionWidget = _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : Text(
+            _suggestion,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 16,
+                fontStyle: FontStyle.italic,
+                color: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.color
+                    ?.withAlpha((255 * 0.8).round())),
+          );
+
+    // 3. Return layout based on orientation
+    if (isPortrait) {
+      // --- PORTRAIT LAYOUT ---
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(height: spacerHeight),
+          timerWidget,
+          SizedBox(height: spacerHeight),
+          suggestionWidget,
+          // --- FIX: Removed const Spacer() ---
+          // It conflicts with SingleChildScrollView
+        ],
+      );
+    } else {
+      // --- LANDSCAPE LAYOUT ---
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          timerWidget,
+          SizedBox(width: spacerHeight * 2), // Use responsive spacing
+          // --- FIX: Wrap Text in Flexible to prevent Row overflow ---
+          Flexible(
+            child: suggestionWidget,
+          ),
+        ],
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -173,61 +250,30 @@ class _HomePageState extends State<HomePage> {
             ),
         ],
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: widget.activeGoal == null
-              ? GoalSetterCard(onSetGoal: widget.onSetGoal)
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 40),
-                    // --- FIX: Modify logic for empty vs. completed goals ---
-                    if (widget.activeGoal!.milestones.isEmpty)
-                      const Center(
-                        child: Text(
-                          "Goal set! Go to the Milestones page to add your first task.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 16, fontStyle: FontStyle.italic),
-                        ),
-                      )
-                    else if (_nextMilestone == null)
-                      const Center(
-                        child: Text(
-                          "All milestones complete! 🎉",
-                          style: TextStyle(fontSize: 18),
-                        ),
-                      )
-                    else
-                      GoalTimerCircle(
-                        // Pass key to update when goal time changes
-                        key: ValueKey(
-                            widget.activeGoal!.totalTimeSpent.inSeconds),
-                        goal: widget.activeGoal!,
-                        nextMilestone: _nextMilestone!,
-                        onTimeAdd: widget.onTimeAdd,
-                      ),
-                    const SizedBox(height: 40),
-                    _isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : Text(
-                            _suggestion,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontStyle: FontStyle.italic,
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.color
-                                    // FIX: Replaced deprecated .withOpacity with .withAlpha
-                                    ?.withAlpha((255 * 0.8).round())),
-                          ),
-                    const Spacer(),
-                  ],
-                ),
-        ),
+      body: OrientationBuilder(
+        builder: (context, orientation) {
+          // --- FIX: Add responsive logic ---
+          final isPortrait = orientation == Orientation.portrait;
+          // Smaller size for landscape, larger for portrait
+          final double timerSize = isPortrait ? 200.0 : 140.0;
+          // Less vertical padding for landscape
+          final double spacerHeight = isPortrait ? 40.0 : 20.0;
+
+          // --- FIX: Wrap with SingleChildScrollView to guarantee no overflow ---
+          return SingleChildScrollView(
+            physics:
+                const AlwaysScrollableScrollPhysics(), // Ensure it can always scroll
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: widget.activeGoal == null
+                    ? GoalSetterCard(onSetGoal: widget.onSetGoal)
+                    // --- FIX: Use new helper function ---
+                    : _buildGoalDisplay(isPortrait, timerSize, spacerHeight),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -237,6 +283,7 @@ class _HomePageState extends State<HomePage> {
 class GoalTimerCircle extends StatefulWidget {
   final Goal goal;
   final Milestone nextMilestone;
+  final double size;
   final Function(String, Duration) onTimeAdd;
 
   const GoalTimerCircle({
@@ -244,6 +291,7 @@ class GoalTimerCircle extends StatefulWidget {
     required this.goal,
     required this.nextMilestone,
     required this.onTimeAdd,
+    required this.size,
   });
 
   @override
@@ -397,7 +445,11 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
 
     // --- FEAT: Build RichText for total time display ---
     final String totalTimeText = _formatTotalTime(widget.goal.totalTimeSpent);
-    final double fontSize = totalTimeText.length > 8 ? 30 : 36; // Adjusted size
+    // --- FIX: Use widget.size for responsive font ---
+    final double baseFontSize = widget.size / 5.5; // Base size
+    final double fontSize = totalTimeText.length > 8
+        ? baseFontSize * 0.83
+        : baseFontSize; // (0.83 is 30/36)
 
     final TextStyle numberStyle = TextStyle(
       fontSize: fontSize,
@@ -440,15 +492,17 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
       onLongPress: _onLongPress,
       onTap: _onTap,
       child: SizedBox(
-        width: 200,
-        height: 200,
+        // --- FIX: Use widget.size ---
+        width: widget.size,
+        height: widget.size,
         child: Stack(
           alignment: Alignment.center,
           children: [
             // Animation ring
             SizedBox(
-              width: 200,
-              height: 200,
+              // --- FIX: Use widget.size ---
+              width: widget.size,
+              height: widget.size,
               child: CircularProgressIndicator(
                 value: _animationController.value,
                 strokeWidth: 10,
@@ -459,8 +513,9 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
             ),
             // Background circle
             Container(
-              width: 180,
-              height: 180,
+              // --- FIX: Use widget.size ---
+              width: widget.size - 20,
+              height: widget.size - 20,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: primaryColor.withOpacity(0.1),
@@ -473,7 +528,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
               firstChild: Text(
                 _formatRunningTime(_secondsElapsed),
                 style: TextStyle(
-                  fontSize: 36,
+                  // --- FIX: Use widget.size ---
+                  fontSize: widget.size / 5.5,
                   fontWeight: FontWeight.bold,
                   color: primaryColor,
                   fontFamily: 'monospace',
@@ -622,7 +678,7 @@ class MilestonesPageState extends State<MilestonesPage>
           }
         }
       }
-      
+
       // Combine lists
       sortedMilestones = upcoming + completed;
     }
@@ -705,14 +761,6 @@ class SettingsPage extends StatelessWidget {
       required this.editMode,
       required this.onEditModeChanged,
       required this.allGoals});
-
-  // // --- _launchURL method (unchanged) ---
-  // Future<void> _launchURL(String urlString) async {
-  //   final Uri url = Uri.parse(urlString);
-  //   if (!await launchUrl(url)) {
-  //     throw Exception('Could not launch $url');
-  //   }
-  // }
 
   @override
   Widget build(BuildContext context) {
@@ -1364,77 +1412,81 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20.0),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("New Milestone",
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                  labelText: 'Title', border: OutlineInputBorder()),
-              validator: (value) => value == null || value.isEmpty
-                  ? 'Please enter a title'
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _tasksController,
-              decoration: const InputDecoration(
-                  labelText: 'Tasks (one per line)',
-                  border: OutlineInputBorder()),
-              maxLines: 3,
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: _isSuggestingTasks
-                  ? const Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
-                    )
-                  : TextButton.icon(
-                      onPressed: _getTaskSuggestions,
-                      icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                      label: const Text("Suggest Tasks"),
-                    ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _selectedDate == null
-                        ? 'No date chosen'
-                        : 'Due: ${DateFormat.yMMMd().format(_selectedDate!)}',
-                    style: TextStyle(
-                      color: _selectedDate == null && _dateSubmittedOnce
-                          ? Colors.red
-                          : null,
+    // --- FIX: Wrap the content in a SingleChildScrollView ---
+    // This prevents the keyboard from causing a RenderFlex overflow.
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("New Milestone",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                    labelText: 'Title', border: OutlineInputBorder()),
+                validator: (value) => value == null || value.isEmpty
+                    ? 'Please enter a title'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _tasksController,
+                decoration: const InputDecoration(
+                    labelText: 'Tasks (one per line)',
+                    border: OutlineInputBorder()),
+                maxLines: 3,
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _isSuggestingTasks
+                    ? const Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
+                    : TextButton.icon(
+                        onPressed: _getTaskSuggestions,
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                        label: const Text("Suggest Tasks"),
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _selectedDate == null
+                          ? 'No date chosen'
+                          : 'Due: ${DateFormat.yMMMd().format(_selectedDate!)}',
+                      style: TextStyle(
+                        color: _selectedDate == null && _dateSubmittedOnce
+                            ? Colors.red
+                            : null,
+                      ),
                     ),
                   ),
-                ),
-                TextButton(
-                    onPressed: _pickDate, child: const Text('Choose Date')),
-              ],
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _submit,
-                child: const Text('Add Milestone'),
+                  TextButton(
+                      onPressed: _pickDate, child: const Text('Choose Date')),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _submit,
+                  child: const Text('Add Milestone'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
