@@ -1,4 +1,4 @@
-# 🎯 Milestone Tracker
+#  Milestone Tracker
 
 > **A simple, focused Flutter application to help you break large goals into actionable milestones and track your progress over time.**
 
@@ -8,7 +8,7 @@
 
 ---
 
-## ✨ Features
+##  Features
 
 - **Goal Setting**: Define your primary long-term goal.  
 - **Milestone Tracking**: Break down your goal into smaller, manageable milestones with specific tasks.  
@@ -18,7 +18,7 @@
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### **Prerequisites**
 - [Flutter SDK](https://flutter.dev/docs/get-started/install)
@@ -63,7 +63,7 @@ text
 
 ---
 
-## 🛠️ Technology Stack
+##  Technology Stack
 
 | Tool       | Purpose |
 |------------|---------|
@@ -74,7 +74,7 @@ text
 
 ---
 
-## 🤝 Contributing
+##  Contributing
 
 💡 Got ideas to make this app even better? Contributions are welcome!  
 Here’s how:
@@ -85,7 +85,7 @@ Here’s how:
 
 ---
 
-## 📜 License
+##  License
 
 This project is open source and available under the [MIT License](LICENSE).
 
