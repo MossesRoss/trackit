@@ -43,7 +43,7 @@ class _UpgradePageState extends State<UpgradePage> {
     final isDarkMode = theme.brightness == Brightness.dark;
 
     // Use theme-aware colors
-    final iconColor = theme.colorScheme.primary;
+    // final iconColor = theme.colorScheme.primary;
     final subtleTextColor = theme.textTheme.bodySmall?.color;
 
     return Scaffold(
