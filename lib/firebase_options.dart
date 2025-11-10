@@ -13,15 +13,9 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
         return windows;
       case TargetPlatform.linux:
@@ -48,7 +42,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyA0_M2Cctc3-DjTaE_gIc2N8nOoo2UZy7A',
-    appId: '1:1059947667065:android:2502d7bae76cf0fd76bea8',
+    appId: '1:1059947667065:android:24b3289c95db42a576bea8',
     messagingSenderId: '1059947667065',
     projectId: 'trackit-007',
     storageBucket: 'trackit-007.firebasestorage.app',
@@ -63,4 +57,27 @@ class DefaultFirebaseOptions {
     storageBucket: 'trackit-007.firebasestorage.app',
     measurementId: 'G-8946HYZ3NZ',
   );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyCs5TebVg1G8k3C0vpmEb2ZC1871eukdJU',
+    appId: '1:1059947667065:ios:d0c058889fef66fe76bea8',
+    messagingSenderId: '1059947667065',
+    projectId: 'trackit-007',
+    storageBucket: 'trackit-007.firebasestorage.app',
+    androidClientId: '1059947667065-bg60rck2j94uhdghcul3reonppanln91.apps.googleusercontent.com',
+    iosClientId: '1059947667065-lma0nhi0de2r7mei0fjrqr2476viebna.apps.googleusercontent.com',
+    iosBundleId: 'com.example.trackit',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyCs5TebVg1G8k3C0vpmEb2ZC1871eukdJU',
+    appId: '1:1059947667065:ios:7523cde7e6237b9176bea8',
+    messagingSenderId: '1059947667065',
+    projectId: 'trackit-007',
+    storageBucket: 'trackit-007.firebasestorage.app',
+    androidClientId: '1059947667065-bg60rck2j94uhdghcul3reonppanln91.apps.googleusercontent.com',
+    iosClientId: '1059947667065-cs4vak2d44kg9c029tao8kj1p3sn54rh.apps.googleusercontent.com',
+    iosBundleId: 'com.mosses.trackit',
+  );
+
 }
