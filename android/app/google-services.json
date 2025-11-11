@@ -37,6 +37,57 @@
             {
               "client_id": "1059947667065-fq2mshaq9sfg24io782qhjaajmq8oi99.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "1059947667065-cs4vak2d44kg9c029tao8kj1p3sn54rh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.mosses.trackit"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1059947667065:android:24b3289c95db42a576bea8",
+        "android_client_info": {
+          "package_name": "com.mosses.trackit"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1059947667065-qbrsn9n4m40kkjail4dfnnroh6altbmn.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mosses.trackit",
+            "certificate_hash": "47c8c7d9c6c47156ed5dd89e864ef27c317afd65"
+          }
+        },
+        {
+          "client_id": "1059947667065-fq2mshaq9sfg24io782qhjaajmq8oi99.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA0_M2Cctc3-DjTaE_gIc2N8nOoo2UZy7A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1059947667065-fq2mshaq9sfg24io782qhjaajmq8oi99.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1059947667065-cs4vak2d44kg9c029tao8kj1p3sn54rh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.mosses.trackit"
+              }
             }
           ]
         }

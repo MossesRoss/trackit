@@ -25,6 +25,8 @@
  * v1.5.8:
  * - [FIX] Corrected a missing brace '}' syntax error
  */
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -37,7 +39,6 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 
 import './models.dart';
@@ -64,6 +65,8 @@ class ThemeProvider with ChangeNotifier {
 
   bool get isDarkMode => _themeMode == ThemeMode.dark;
 
+  final _storage = const FlutterSecureStorage();
+
   ThemeProvider() {
     _loadTheme();
   }
@@ -71,11 +74,12 @@ class ThemeProvider with ChangeNotifier {
   /// Loads the saved theme mode from SharedPreferences.
   void _loadTheme() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      // Load the theme index (0 = light, 1 = system, 2 = dark)
-      final themeIndex = prefs.getInt(_kThemePersistenceKey) ?? 0;
-      _themeMode = ThemeMode.values[themeIndex];
-      notifyListeners();
+      final themeIndexString = await _storage.read(key: _kThemePersistenceKey);
+      if (themeIndexString != null) {
+        final themeIndex = int.parse(themeIndexString);
+        _themeMode = ThemeMode.values[themeIndex];
+        notifyListeners();
+      }
     } catch (e) {
       debugPrint("Error loading theme: $e");
     }
@@ -88,8 +92,8 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_kThemePersistenceKey, _themeMode.index);
+      await _storage.write(
+          key: _kThemePersistenceKey, value: _themeMode.index.toString());
     } catch (e) {
       debugPrint("Error saving theme: $e");
     }
@@ -98,6 +102,7 @@ class ThemeProvider with ChangeNotifier {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -105,11 +110,9 @@ Future<void> main() async {
 
   // --- FIX: Add one-time migration to clear the old, non-user-specific cache ---
   try {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.containsKey(_oldLocalCacheKey)) {
-      await prefs.remove(_oldLocalCacheKey);
-      debugPrint("MIGRATION: Removed old, non-user-specific goals cache.");
-    }
+    const _storage = FlutterSecureStorage();
+    await _storage.delete(key: _oldLocalCacheKey);
+    debugPrint("MIGRATION: Removed old, non-user-specific goals cache.");
   } catch (e) {
     debugPrint("Error during one-time cache migration: $e");
   }
@@ -281,6 +284,7 @@ class _MainPageState extends State<MainPage> {
   }
 
   final bool _clearCacheOnStartup = false;
+  final _storage = const FlutterSecureStorage();
 
   @override
   void initState() {
@@ -340,8 +344,8 @@ class _MainPageState extends State<MainPage> {
 
     // Save the new value
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_kEditModePersistenceKey, newValue);
+      await _storage.write(
+          key: _kEditModePersistenceKey, value: newValue.toString());
       debugPrint("Saved editMode: $newValue");
     } catch (e) {
       debugPrint("Error saving edit mode preference: $e");
@@ -350,139 +354,152 @@ class _MainPageState extends State<MainPage> {
 
   /// --- MODIFIED: Combined loading and launch processing function ---
   Future<void> _loadGoalsAndProcessLaunch() async {
-    debugPrint("_loadGoalsAndProcessLaunch: Starting...");
+    debugPrint("[DEBUG] _loadGoalsAndProcessLaunch: Starting...");
     setState(() => _isLoading = true);
 
     // --- 1. Load Edit Mode (from old _loadGoalsAndRecover) ---
     try {
-      final prefs = await SharedPreferences.getInstance();
-      // Load the edit mode, default to true if not found
-      final savedEditMode = prefs.getBool(_kEditModePersistenceKey) ?? true;
-      if (mounted) {
-        setState(() {
-          _editMode = savedEditMode;
-        });
-        debugPrint("Loaded editMode: $_editMode");
+      debugPrint("[DEBUG] Loading edit mode...");
+      final savedEditModeString =
+          await _storage.read(key: _kEditModePersistenceKey);
+      debugPrint("[DEBUG] Edit mode string from storage: $savedEditModeString");
+      if (savedEditModeString != null) {
+        final savedEditMode = savedEditModeString.toLowerCase() == 'true';
+        if (mounted) {
+          setState(() {
+            _editMode = savedEditMode;
+          });
+          debugPrint("[DEBUG] Loaded editMode: $_editMode");
+        }
       }
     } catch (e) {
-      debugPrint("Error loading edit mode preference: $e");
+      debugPrint("[DEBUG] Error loading edit mode preference: $e");
     }
 
     // --- 2. Load Goals (from old _loadGoalsAndRecover) ---
-    final persistenceService =
-        Provider.of<FirestoreService>(context, listen: false);
-    debugPrint(
-        "_loadGoalsAndProcessLaunch: Got FirestoreService instance for uid: ${persistenceService.uid}");
-
-    if (_clearCacheOnStartup) {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        // --- FIX: Must use the *user-specific* key to clear it ---
-        if (persistenceService.uid != null) {
-          final userCacheKey = 'all_goals_cache_${persistenceService.uid}';
-          await prefs.remove(userCacheKey);
-          debugPrint(
-              "DEBUG: Force cleared local goals cache ('$userCacheKey').");
-        }
-      } catch (e) {
-        debugPrint("DEBUG: Error clearing cache: $e");
-      }
-    }
-
-    final goals = await persistenceService.loadGoals();
-    if (!mounted) {
+    try {
+      debugPrint("[DEBUG] Loading goals...");
+      final persistenceService =
+          Provider.of<FirestoreService>(context, listen: false);
       debugPrint(
-          "_loadGoalsAndProcessLaunch: Widget unmounted during load. Aborting.");
-      return; // Check if widget is still mounted
-    }
-    debugPrint("_loadGoalsAndProcessLaunch: Loaded ${goals.length} goals.");
+          "[DEBUG] _loadGoalsAndProcessLaunch: Got FirestoreService instance for uid: ${persistenceService.uid}");
 
-    _allGoals = goals;
-    _updateMilestoneLockStatus(); // Update lock status *before* recovery logic
+      if (_clearCacheOnStartup) {
+        try {
+          debugPrint("[DEBUG] Clearing cache on startup...");
+          // --- FIX: Must use the *user-specific* key to clear it ---
+          if (persistenceService.uid != null) {
+            final userCacheKey = 'all_goals_cache_${persistenceService.uid}';
+            await _storage.delete(key: userCacheKey);
+            debugPrint(
+                "[DEBUG] Force cleared local goals cache ('$userCacheKey').");
+          }
+        } catch (e) {
+          debugPrint("[DEBUG] Error clearing cache: $e");
+        }
+      }
+
+      final goals = await persistenceService.loadGoals();
+      if (!mounted) {
+        debugPrint(
+            "[DEBUG] _loadGoalsAndProcessLaunch: Widget unmounted during load. Aborting.");
+        return; // Check if widget is still mounted
+      }
+      debugPrint("[DEBUG] _loadGoalsAndProcessLaunch: Loaded ${goals.length} goals.");
+
+      _allGoals = goals;
+      _updateMilestoneLockStatus(); // Update lock status *before* recovery logic
+    } catch (e) {
+      debugPrint("[DEBUG] Error loading goals: $e");
+    }
 
     // --- 3. Process Launch Notification (from old _checkNotificationLaunchApp) ---
-    // This now runs *after* goals are loaded, but *before* isLoading is false.
-    final notificationAppLaunchDetails =
-        await NotificationService().getNotificationAppLaunchDetails();
+    try {
+      debugPrint("[DEBUG] Processing launch notification...");
+      final notificationAppLaunchDetails =
+          await NotificationService().getNotificationAppLaunchDetails();
 
-    if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
-      final notificationResponse =
-          notificationAppLaunchDetails!.notificationResponse;
-      if (notificationResponse != null) {
-        debugPrint(
-            "App LAUNCHED from notification tap. Processing payload directly...");
+      if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
+        final notificationResponse =
+            notificationAppLaunchDetails!.notificationResponse;
+        if (notificationResponse != null) {
+          debugPrint(
+              "[DEBUG] App LAUNCHED from notification tap. Processing payload directly...");
 
-        // --- FIX: Store this so the stream listener can ignore it ---
-        _processedLaunchNotification = notificationResponse;
+          // --- FIX: Store this so the stream listener can ignore it ---
+          _processedLaunchNotification = notificationResponse;
 
-        // --- FIX: Process it directly by queueing the dialog ---
-        // We must wait for the first frame to build before showing a dialog.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _showCheckinDialog(notificationResponse);
-          }
-        });
+          // --- FIX: Process it directly by queueing the dialog ---
+          // We must wait for the first frame to build before showing a dialog.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _showCheckinDialog(notificationResponse);
+            }
+          });
+        }
       }
+    } catch (e) {
+      debugPrint("[DEBUG] Error processing launch notification: $e");
     }
 
     // --- 4. Recover Timer (from old _loadGoalsAndRecover) ---
-    SharedPreferences? prefs;
     try {
-      prefs = await SharedPreferences.getInstance();
-      final int? recoveredSeconds = prefs.getInt(kRecoveryTimeKey);
-      final String? recoveredMilestoneId =
-          prefs.getString(kRecoveryMilestoneKey);
+      debugPrint("[DEBUG] Recovering timer...");
+      final recoveredSecondsString = await _storage.read(key: kRecoveryTimeKey);
+      final recoveredMilestoneId =
+          await _storage.read(key: kRecoveryMilestoneKey);
+      debugPrint(
+          "[DEBUG] Recovered seconds: $recoveredSecondsString, milestone ID: $recoveredMilestoneId");
 
-      if (recoveredSeconds != null &&
-          recoveredSeconds > 0 &&
-          recoveredMilestoneId != null) {
-        debugPrint(
-            "RECOVERY: Found $recoveredSeconds seconds for milestone $recoveredMilestoneId");
+      if (recoveredSecondsString != null && recoveredMilestoneId != null) {
+        final recoveredSeconds = int.parse(recoveredSecondsString);
+        if (recoveredSeconds > 0) {
+          debugPrint(
+              "[DEBUG] RECOVERY: Found $recoveredSeconds seconds for milestone $recoveredMilestoneId");
 
-        _addTimeToMilestone(
-            recoveredMilestoneId, Duration(seconds: recoveredSeconds));
+          _addTimeToMilestone(
+              recoveredMilestoneId, Duration(seconds: recoveredSeconds));
 
-        await prefs.remove(kRecoveryTimeKey);
-        await prefs.remove(kRecoveryMilestoneKey);
-        debugPrint("RECOVERY: Cleared recovery keys.");
+          await _storage.delete(key: kRecoveryTimeKey);
+          await _storage.delete(key: kRecoveryMilestoneKey);
+          debugPrint("[DEBUG] RECOVERY: Cleared recovery keys.");
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                    "Recovered ${recoveredSeconds}s from your last session."),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                      "Recovered ${recoveredSeconds}s from your last session."),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          });
+        }
       } else {
         debugPrint(
-            "RECOVERY: No recovery data found (keys: $kRecoveryTimeKey, $kRecoveryMilestoneKey).");
+            "[DEBUG] RECOVERY: No recovery data found (keys: $kRecoveryTimeKey, $kRecoveryMilestoneKey).");
       }
     } catch (e) {
-      debugPrint("RECOVERY ERROR: Failed to process recovery data: $e");
+      debugPrint("[DEBUG] RECOVERY ERROR: Failed to process recovery data: $e");
       try {
-        if (prefs != null) {
-          await prefs.remove(kRecoveryTimeKey);
-          await prefs.remove(kRecoveryMilestoneKey);
-          debugPrint("RECOVERY: Cleared recovery keys due to error.");
-        }
+        await _storage.delete(key: kRecoveryTimeKey);
+        await _storage.delete(key: kRecoveryMilestoneKey);
+        debugPrint("[DEBUG] RECOVERY: Cleared recovery keys due to error.");
       } catch (clearError) {
         debugPrint(
-            "RECOVERY ERROR: Failed to clear recovery keys during error handling: $clearError");
+            "[DEBUG] RECOVERY ERROR: Failed to clear recovery keys during error handling: $clearError");
       }
     }
 
     // --- 5. Set loading to false
     if (mounted) {
-      debugPrint("_loadGoalsAndProcessLaunch: Setting isLoading to false.");
+      debugPrint("[DEBUG] _loadGoalsAndProcessLaunch: Setting isLoading to false.");
       setState(() {
         _isLoading = false;
       });
     }
-    debugPrint("_loadGoalsAndProcessLaunch: Finished.");
+    debugPrint("[DEBUG] _loadGoalsAndProcessLaunch: Finished.");
   }
 
   // --- saveGoals (CHANGED) ---

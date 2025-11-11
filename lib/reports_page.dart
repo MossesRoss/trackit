@@ -209,23 +209,17 @@ class _ReportsPageState extends State<ReportsPage>
   }
 }
 
-// --- NEW: Widget for the 'Overall' tab ---
 class OverallReportView extends StatelessWidget {
-  // --- FIX: Removed activeGoal property ---
-  // final Goal? activeGoal;
-  // const OverallReportView({super.key, this.activeGoal});
   const OverallReportView({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // --- FIX: Get activeGoal from the stream ---
     final firestoreService = Provider.of<FirestoreService>(context);
 
     return StreamBuilder<List<Goal>>(
         stream: firestoreService.getGoalsStream(),
         builder: (context, snapshot) {
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            // This can be simplified, as ReportsPage now handles the "no goal" case
             return const Center(child: Text("Loading..."));
           }
 
@@ -237,7 +231,6 @@ class OverallReportView extends StatelessWidget {
           } catch (e) {
             activeGoal = null;
           }
-          // --- End of fix ---
 
           // --- FIX: Removed redundant "No active goal" message ---
           // This is now handled by the parent ReportsPage
@@ -245,9 +238,9 @@ class OverallReportView extends StatelessWidget {
             // This should technically not be reached if parent is fixed
             return const Center(child: Text("Loading..."));
           }
-          
+
           if (activeGoal.totalTasks == 0) {
-          // --- End of fix ---
+            // --- End of fix ---
             return const Center(
               child: Padding(
                 padding: EdgeInsets.all(16.0),
@@ -262,25 +255,29 @@ class OverallReportView extends StatelessWidget {
             );
           }
 
-          return Center(
-            // --- STYLE: Add padding and change alignment ---
-            child: Padding(
-              padding: const EdgeInsets.only(top: 32.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.start, // <-- FIX
-                children: [
-                  // --- STYLE: Remove redundant title ---
-                  // const Text(
-                  //   "Overall Goal Progress",
-                  //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  // ),
-                  // --- STYLE: Remove extra space ---
-                  // const SizedBox(height: 24),
-                  ProgressPieChart(
-                    completed: activeGoal.completedTasks,
-                    total: activeGoal.totalTasks,
-                  ),
-                ],
+          // --- FIX: WRAP THE WIDGET IN A SingleChildScrollView ---
+          return SingleChildScrollView(
+            child: Center(
+              // --- STYLE: Add padding and change alignment ---
+              child: Padding(
+                // Added top and bottom padding for scrolling room
+                padding: const EdgeInsets.symmetric(vertical: 32.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start, // <-- FIX
+                  children: [
+                    // --- STYLE: Remove redundant title ---
+                    // const Text(
+                    //   "Overall Goal Progress",
+                    //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    // ),
+                    // --- STYLE: Remove extra space ---
+                    // const SizedBox(height: 24),
+                    ProgressPieChart(
+                      completed: activeGoal.completedTasks,
+                      total: activeGoal.totalTasks,
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -335,9 +332,9 @@ class ReportView extends StatelessWidget {
             reportData['previousPeriod'] as Map<String, dynamic>;
         final summary = reportData['summary'] as String?;
         // --- FIX: Ensure checkinCounts is not null ---
-        final checkinCounts = (currentPeriod['checkinCounts']
-                as Map<TaskCheckinStatus, int>?) ??
-            {};
+        final checkinCounts =
+            (currentPeriod['checkinCounts'] as Map<TaskCheckinStatus, int>?) ??
+                {};
         final archivedGoals = reportData['archivedGoals'] as List<Goal>?;
 
         final Duration currentDuration =
