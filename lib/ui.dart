@@ -10,6 +10,7 @@
  * - [FIX] Fixed "BoxConstraints forces an infinite height" layout crash in 
  * GoalDetailsPage (Journey) by removing a nested Column inside a ListView.
  */
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
@@ -17,7 +18,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import './models.dart';
 import './services.dart';
@@ -99,16 +99,16 @@ class _HomePageState extends State<HomePage> {
     }
     // --- END NEW FIX ---
 
-    final prefs = await SharedPreferences.getInstance();
+    final _storage = const FlutterSecureStorage();
     final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String? currentMilestoneId = _nextMilestone?.id;
 
     // Check cache first
-    final String? cachedDate = prefs.getString('suggestion_cache_date');
+    final String? cachedDate = await _storage.read(key: 'suggestion_cache_date');
     final String? cachedMilestoneId =
-        prefs.getString('suggestion_cache_milestone_id');
+        await _storage.read(key: 'suggestion_cache_milestone_id');
     final String? cachedSuggestion =
-        prefs.getString('suggestion_cache_content');
+        await _storage.read(key: 'suggestion_cache_content');
 
     if (cachedDate == currentDate &&
         cachedMilestoneId == currentMilestoneId &&
@@ -131,10 +131,10 @@ class _HomePageState extends State<HomePage> {
       if (result.suggestion != null) {
         textToShow = result.suggestion!;
         // Save to cache
-        await prefs.setString('suggestion_cache_date', currentDate);
-        await prefs.setString(
-            'suggestion_cache_milestone_id', currentMilestoneId ?? '');
-        await prefs.setString('suggestion_cache_content', textToShow);
+        await _storage.write(key: 'suggestion_cache_date', value: currentDate);
+        await _storage.write(
+            key: 'suggestion_cache_milestone_id', value: currentMilestoneId ?? '');
+        await _storage.write(key: 'suggestion_cache_content', value: textToShow);
       } else {
         // Handle errors and get fallback
         if (result.error == "NO_API_KEY") {
@@ -288,9 +288,9 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     _animationController.value = 1.5;
 
     // Clear any old recovery keys before starting a new session
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(kRecoveryTimeKey);
-    await prefs.remove(kRecoveryMilestoneKey);
+    final _storage = const FlutterSecureStorage();
+    await _storage.delete(key: kRecoveryTimeKey);
+    await _storage.delete(key: kRecoveryMilestoneKey);
     debugPrint("Timer started. Cleared old recovery keys.");
 
     NotificationService().showFocusNotification(
@@ -308,10 +308,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
       if (_secondsElapsed % 5 == 0) {
         // We use .then() (fire-and-forget) so we don't 'await'
         // inside a periodic timer, which is bad practice.
-        SharedPreferences.getInstance().then((prefs) {
-          prefs.setInt(kRecoveryTimeKey, _secondsElapsed);
-          prefs.setString(kRecoveryMilestoneKey, widget.nextMilestone.id);
-        });
+        _storage.write(key: kRecoveryTimeKey, value: _secondsElapsed.toString());
+        _storage.write(key: kRecoveryMilestoneKey, value: widget.nextMilestone.id);
         debugPrint("Timer recovery data saved: $_secondsElapsed seconds");
       }
     });
@@ -323,9 +321,9 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
 
     // Clear the recovery keys FIRST.
     // This prevents a double-count if the app is closed right after stopping.
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(kRecoveryTimeKey);
-    await prefs.remove(kRecoveryMilestoneKey);
+    final _storage = const FlutterSecureStorage();
+    await _storage.delete(key: kRecoveryTimeKey);
+    await _storage.delete(key: kRecoveryMilestoneKey);
     debugPrint("Timer stopped. Cleared recovery keys.");
 
     if (_secondsElapsed > 0) {
@@ -1688,6 +1686,8 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   bool _isLoading = true;
   bool _hasExactAlarmPermission = false;
 
+  final _storage = const FlutterSecureStorage();
+
   @override
   void initState() {
     super.initState();
@@ -1712,26 +1712,33 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
+    final notificationCountString =
+        await _storage.read(key: 'notification_count');
+    final timeStringsJson = await _storage.read(key: 'notification_times');
+
     setState(() {
-      _notificationCount = prefs.getInt('notification_count') ?? 1;
-      final timeStrings =
-          prefs.getStringList('notification_times') ?? ['09:00'];
-      _notificationTimes = timeStrings.map((t) {
-        final parts = t.split(':');
-        return TimeOfDay(
-            hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-      }).toList();
+      _notificationCount =
+          notificationCountString != null ? int.parse(notificationCountString) : 1;
+      if (timeStringsJson != null) {
+        final List<String> timeStrings = List<String>.from(json.decode(timeStringsJson));
+        _notificationTimes = timeStrings.map((t) {
+          final parts = t.split(':');
+          return TimeOfDay(
+              hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+        }).toList();
+      } else {
+        _notificationTimes = [const TimeOfDay(hour: 9, minute: 0)];
+      }
       _isLoading = false;
     });
   }
 
   Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('notification_count', _notificationCount);
+    await _storage.write(
+        key: 'notification_count', value: _notificationCount.toString());
     final timeStrings =
         _notificationTimes.map((t) => '${t.hour}:${t.minute}').toList();
-    await prefs.setStringList('notification_times', timeStrings);
+    await _storage.write(key: 'notification_times', value: json.encode(timeStrings));
   }
 
   void _updateAndSaveChanges() async {
@@ -1743,8 +1750,10 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final int oldNotificationCount = prefs.getInt('notification_count') ?? 0;
+    final oldNotificationCountString =
+        await _storage.read(key: 'notification_count');
+    final int oldNotificationCount =
+        oldNotificationCountString != null ? int.parse(oldNotificationCountString) : 0;
 
     for (int i = 0; i < oldNotificationCount; i++) {
       await NotificationService().cancelNotification(i);

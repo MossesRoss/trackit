@@ -15,6 +15,7 @@
  * `_RedirectingClient`, which should resolve network errors.
  */
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -25,7 +26,6 @@ import 'package:flutter/foundation.dart'
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http; // Kept for Apps Script calls
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import './models.dart';
 import './notification_service.dart'; // Import the new service
 import 'dart:async'; // --- ADDED for redirect client ---
@@ -117,6 +117,7 @@ Map<String, dynamic> _processPeriodData(Map<String, dynamic> params) {
 class AuthService with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final _storage = const FlutterSecureStorage();
   User? _user;
 
   AuthService() {
@@ -170,15 +171,14 @@ class AuthService with ChangeNotifier {
     try {
       final currentUserUid = _auth.currentUser?.uid;
       if (currentUserUid != null) {
-        final prefs = await SharedPreferences.getInstance();
         final userCacheKey = 'all_goals_cache_$currentUserUid';
-        await prefs.remove(userCacheKey);
+        await _storage.delete(key: userCacheKey);
         debugPrint("Cleared cache for user $currentUserUid");
 
         // --- FIX: Also clear timer recovery keys ---
         // (Keys are from main.dart)
-        await prefs.remove('recovery_time_seconds');
-        await prefs.remove('recovery_milestone_id');
+        await _storage.delete(key: 'recovery_time_seconds');
+        await _storage.delete(key: 'recovery_milestone_id');
         debugPrint("Cleared timer recovery keys.");
       }
     } catch (e) {
@@ -194,6 +194,7 @@ class AuthService with ChangeNotifier {
 // --- FIX: Add the missing FirestoreService class back in ---
 class FirestoreService {
   final String? uid;
+  final _storage = const FlutterSecureStorage();
   FirestoreService(this.uid);
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -246,19 +247,17 @@ class FirestoreService {
   Future<void> _cacheGoals(List<Goal> goals) async {
     // --- FIX: Don't cache if UID is null (e.g., logged out) ---
     if (uid == null) return;
-    final prefs = await SharedPreferences.getInstance();
     final String goalsJson = json.encode(goals.map((g) => g.toJson()).toList());
     // --- FIX: Use user-specific cache key ---
-    await prefs.setString(_userCacheKey, goalsJson);
+    await _storage.write(key: _userCacheKey, value: goalsJson);
   }
 
   Future<List<Goal>> loadGoals() async {
     // --- FIX: If no user, return empty list immediately ---
     if (uid == null) return [];
 
-    final prefs = await SharedPreferences.getInstance();
     // --- FIX: Use user-specific cache key ---
-    final String? localGoalsJson = prefs.getString(_userCacheKey);
+    final String? localGoalsJson = await _storage.read(key: _userCacheKey);
 
     if (localGoalsJson != null) {
       final List<dynamic> decodedJson = json.decode(localGoalsJson);
@@ -551,10 +550,20 @@ class SuggestionService {
       Map<String, dynamic> currentData,
       Map<String, dynamic> previousData) async {
     debugPrint("Requesting monthly summary from backend...");
+
+    // Convert Duration objects to seconds
+    final currentDataInSeconds = Map<String, dynamic>.from(currentData);
+    currentDataInSeconds['timeSpent'] =
+        (currentData['timeSpent'] as Duration).inSeconds;
+
+    final previousDataInSeconds = Map<String, dynamic>.from(previousData);
+    previousDataInSeconds['timeSpent'] =
+        (previousData['timeSpent'] as Duration).inSeconds;
+
     // Call the new Apps Script backend
     final result = await _callAppsScript('getMonthlyReportSummary', {
-      'currentData': currentData,
-      'previousData': previousData,
+      'currentData': currentDataInSeconds,
+      'previousData': previousDataInSeconds,
     });
 
     // --- UPDATED: Check for error and return it, or return fallback ---
@@ -582,13 +591,17 @@ class QuoteService {
   ];
 
   static Future<String> getQuote() async {
-    final prefs = await SharedPreferences.getInstance();
-    int lastIndex = prefs.getInt(_quoteIndexKey) ?? -1;
+    final _storage = const FlutterSecureStorage();
+    final lastIndexString = await _storage.read(key: _quoteIndexKey);
+    int lastIndex = -1;
+    if (lastIndexString != null) {
+      lastIndex = int.parse(lastIndexString);
+    }
 
     // Increment index and loop back to 0 if at the end
     int nextIndex = (lastIndex + 1) % _quotes.length;
 
-    await prefs.setInt(_quoteIndexKey, nextIndex);
+    await _storage.write(key: _quoteIndexKey, value: nextIndex.toString());
     return _quotes[nextIndex];
   }
 }
