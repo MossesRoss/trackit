@@ -1,7 +1,11 @@
 /*
  * @author Mosses
- * @version 1.4.3
+ * @version 1.4.4
  * --- CHANGELOG ---
+ * v1.4.4:
+ * - [FIX] Re-implemented `_RedirectingClient` to *manually* handle 302
+ * redirects for POST requests, as the underlying http client does not
+ * honor `followRedirects` for POST. This fixes the "HTTP Error 302" log.
  * v1.4.3:
  * - [FEAT] Changed all AI-related error handling in `_callAppsScript` to
  * return a user-friendly "Upgrade to Pro..." message instead of
@@ -31,19 +35,53 @@ import './notification_service.dart'; // Import the new service
 import 'dart:async'; // --- ADDED for redirect client ---
 
 // --- NEW: This is the fix for the HTTP 302 Redirect Error ---
-// This class wraps the default HTTP client and tells it to follow
-// redirects even for POST requests.
+// This class wraps the default HTTP client and manually follows redirects
+// for POST requests.
 class _RedirectingClient extends http.BaseClient {
   final http.Client _inner;
   _RedirectingClient(this._inner);
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
-    // For POST requests, manually set followRedirects to true.
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    // --- FIX: Handle POST redirects manually ---
     if (request.method == 'POST') {
-      request.followRedirects = true;
-      request.maxRedirects = 5; // Set a reasonable limit
+      // Tell the inner client NOT to follow redirects, as we'll do it.
+      request.followRedirects = false;
+
+      final response = await _inner.send(request);
+
+      // Check for redirect status codes
+      if (response.statusCode == 301 ||
+          response.statusCode == 302 ||
+          response.statusCode == 307) {
+        final location = response.headers['location'];
+        if (location != null) {
+          debugPrint(
+              "Redirecting client: POST got ${response.statusCode}, manually following to $location");
+
+          // Create a new GET request to the redirect location.
+          // This is standard browser behavior for 302 on a POST.
+          final newUri = Uri.parse(location);
+          final newRequest = http.Request('GET', newUri)
+            // Copy over headers, but remove headers specific to POST/body
+            ..headers.addAll(Map.from(request.headers)
+              ..remove('host')
+              ..remove('content-length')
+              ..remove('content-type'));
+
+          // Send the new GET request
+          return _inner.send(newRequest);
+        }
+      }
+      // If not a redirect, return the original response
+      return response;
     }
+    // --- End of new logic ---
+
+    // For non-POST requests (like GET), let the inner client handle
+    // redirects normally.
+    request.followRedirects = true;
+    request.maxRedirects = 5;
     return _inner.send(request);
   }
 }

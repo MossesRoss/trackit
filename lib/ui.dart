@@ -1,13 +1,18 @@
 /*
  * @author Mosses
- * @version 1.5.5
+ * @version 1.5.6
  * --- CHANGELOG ---
+ * v1.5.6:
+ * - [FIX] Merged v1.5.5 changes (Stack layout, SecureStorage) with previous overflow fixes.
+ * - [FIX] Re-applied responsive/scrolling layout to HomePage (from v1.5.2).
+ * - [FIX] Re-applied responsive `size` property to GoalTimerCircle (from v1.5.1).
+ * - [FIX] Re-applied SingleChildScrollView to AddMilestoneForm (from v1.5.3).
  * v1.5.5:
  * - [FIX] Refactored `MilestoneNode` to use a `Stack` instead of a `Row`.
- * - [FIX] This resolves the "BoxConstraints forces an infinite height" crash 
+ * - [FIX] This resolves the "BoxConstraints forces an infinite height" crash
  * that was happening on both MilestonesPage and GoalDetailsPage.
  * v1.5.4:
- * - [FIX] Fixed "BoxConstraints forces an infinite height" layout crash in 
+ * - [FIX] Fixed "BoxConstraints forces an infinite height" layout crash in
  * GoalDetailsPage (Journey) by removing a nested Column inside a ListView.
  */
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -99,6 +104,7 @@ class _HomePageState extends State<HomePage> {
     }
     // --- END NEW FIX ---
 
+    // --- v1.5.5 Change: Use FlutterSecureStorage ---
     final _storage = const FlutterSecureStorage();
     final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String? currentMilestoneId = _nextMilestone?.id;
@@ -133,7 +139,8 @@ class _HomePageState extends State<HomePage> {
         // Save to cache
         await _storage.write(key: 'suggestion_cache_date', value: currentDate);
         await _storage.write(
-            key: 'suggestion_cache_milestone_id', value: currentMilestoneId ?? '');
+            key: 'suggestion_cache_milestone_id',
+            value: currentMilestoneId ?? '');
         await _storage.write(key: 'suggestion_cache_content', value: textToShow);
       } else {
         // Handle errors and get fallback
@@ -155,6 +162,80 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // --- MERGE FIX (v1.5.6): Add helper widget for responsive layout ---
+  Widget _buildGoalDisplay(
+      bool isPortrait, double timerSize, double spacerHeight) {
+    // 1. Handle empty/completed goals first
+    if (widget.activeGoal!.milestones.isEmpty) {
+      return const Center(
+        child: Text(
+          "Goal set! Go to the Milestones page to add your first task.",
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
+        ),
+      );
+    }
+    if (_nextMilestone == null) {
+      return const Center(
+        child: Text(
+          "All milestones complete! 🎉",
+          style: TextStyle(fontSize: 18),
+        ),
+      );
+    }
+
+    // 2. Build the individual components
+    final Widget timerWidget = GoalTimerCircle(
+      key: ValueKey(widget.activeGoal!.totalTimeSpent.inSeconds),
+      goal: widget.activeGoal!,
+      nextMilestone: _nextMilestone!,
+      onTimeAdd: widget.onTimeAdd,
+      size: timerSize, // <-- Pass responsive size
+    );
+
+    final Widget suggestionWidget = _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : Text(
+            _suggestion,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 16,
+                fontStyle: FontStyle.italic,
+                color: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.color
+                    ?.withAlpha((255 * 0.8).round())),
+          );
+
+    // 3. Return layout based on orientation
+    if (isPortrait) {
+      // --- PORTRAIT LAYOUT ---
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(height: spacerHeight),
+          timerWidget,
+          SizedBox(height: spacerHeight),
+          suggestionWidget,
+        ],
+      );
+    } else {
+      // --- LANDSCAPE LAYOUT ---
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          timerWidget,
+          SizedBox(width: spacerHeight * 2), // Use responsive spacing
+          Flexible(
+            child: suggestionWidget,
+          ),
+        ],
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -169,62 +250,27 @@ class _HomePageState extends State<HomePage> {
             ),
         ],
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: widget.activeGoal == null
-              ? GoalSetterCard(onSetGoal: widget.onSetGoal)
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 40),
-                    // --- FIX: Modify logic for empty vs. completed goals ---
-                    if (widget.activeGoal!.milestones.isEmpty)
-                      const Center(
-                        child: Text(
-                          "Goal set! Go to the Milestones page to add your first task.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 16, fontStyle: FontStyle.italic),
-                        ),
-                      )
-                    else if (_nextMilestone == null)
-                      const Center(
-                        child: Text(
-                          "All milestones complete! 🎉",
-                          style: TextStyle(fontSize: 18),
-                        ),
-                      )
-                    else
-                      GoalTimerCircle(
-                        // Pass key to update when goal time changes
-                        key: ValueKey(
-                            widget.activeGoal!.totalTimeSpent.inSeconds),
-                        goal: widget.activeGoal!,
-                        nextMilestone: _nextMilestone!,
-                        onTimeAdd: widget.onTimeAdd,
-                      ),
-                    const SizedBox(height: 40),
-                    _isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : Text(
-                            _suggestion,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontStyle: FontStyle.italic,
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.color
-                                    // FIX: Replaced deprecated .withOpacity with .withAlpha
-                                    ?.withAlpha((255 * 0.8).round())),
-                          ),
-                    const Spacer(),
-                  ],
-                ),
-        ),
+      // --- MERGE FIX (v1.5.6): Re-apply OrientationBuilder and SingleChildScrollView ---
+      body: OrientationBuilder(
+        builder: (context, orientation) {
+          final isPortrait = orientation == Orientation.portrait;
+          final double timerSize = isPortrait ? 200.0 : 140.0;
+          final double spacerHeight = isPortrait ? 40.0 : 20.0;
+
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: widget.activeGoal == null
+                    ? GoalSetterCard(onSetGoal: widget.onSetGoal)
+                    : _buildGoalDisplay(isPortrait, timerSize, spacerHeight),
+              ),
+            ),
+          );
+        },
       ),
+      // --- END OF MERGE FIX ---
     );
   }
 }
@@ -234,12 +280,16 @@ class GoalTimerCircle extends StatefulWidget {
   final Goal goal;
   final Milestone nextMilestone;
   final Function(String, Duration) onTimeAdd;
+  // --- MERGE FIX (v1.5.6): Add size property ---
+  final double size;
 
   const GoalTimerCircle({
     super.key,
     required this.goal,
     required this.nextMilestone,
     required this.onTimeAdd,
+    // --- MERGE FIX (v1.5.6): Add size to constructor ---
+    required this.size,
   });
 
   @override
@@ -287,7 +337,7 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     });
     _animationController.value = 1.5;
 
-    // Clear any old recovery keys before starting a new session
+    // --- v1.5.5 Change: Use FlutterSecureStorage ---
     final _storage = const FlutterSecureStorage();
     await _storage.delete(key: kRecoveryTimeKey);
     await _storage.delete(key: kRecoveryMilestoneKey);
@@ -304,12 +354,15 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
       });
 
       // --- Robust Timer Save (Your Idea) ---
-      // Every 5 seconds, save the current time to SharedPreferences
+      // Every 5 seconds, save the current time
       if (_secondsElapsed % 5 == 0) {
         // We use .then() (fire-and-forget) so we don't 'await'
         // inside a periodic timer, which is bad practice.
-        _storage.write(key: kRecoveryTimeKey, value: _secondsElapsed.toString());
-        _storage.write(key: kRecoveryMilestoneKey, value: widget.nextMilestone.id);
+        // --- v1.5.5 Change: Use FlutterSecureStorage ---
+        _storage.write(
+            key: kRecoveryTimeKey, value: _secondsElapsed.toString());
+        _storage.write(
+            key: kRecoveryMilestoneKey, value: widget.nextMilestone.id);
         debugPrint("Timer recovery data saved: $_secondsElapsed seconds");
       }
     });
@@ -320,7 +373,7 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     NotificationService().cancelFocusNotification();
 
     // Clear the recovery keys FIRST.
-    // This prevents a double-count if the app is closed right after stopping.
+    // --- v1.5.5 Change: Use FlutterSecureStorage ---
     final _storage = const FlutterSecureStorage();
     await _storage.delete(key: kRecoveryTimeKey);
     await _storage.delete(key: kRecoveryMilestoneKey);
@@ -391,7 +444,11 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
 
     // --- FEAT: Build RichText for total time display ---
     final String totalTimeText = _formatTotalTime(widget.goal.totalTimeSpent);
-    final double fontSize = totalTimeText.length > 8 ? 30 : 36; // Adjusted size
+    // --- MERGE FIX (v1.5.6): Use responsive font size ---
+    final double baseFontSize = widget.size / 5.5; // Base size
+    final double fontSize = totalTimeText.length > 8
+        ? baseFontSize * 0.83
+        : baseFontSize; // (0.83 is 30/36)
 
     final TextStyle numberStyle = TextStyle(
       fontSize: fontSize,
@@ -434,15 +491,17 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
       onLongPress: _onLongPress,
       onTap: _onTap,
       child: SizedBox(
-        width: 200,
-        height: 200,
+        // --- MERGE FIX (v1.5.6): Use responsive size ---
+        width: widget.size,
+        height: widget.size,
         child: Stack(
           alignment: Alignment.center,
           children: [
             // Animation ring
             SizedBox(
-              width: 200,
-              height: 200,
+              // --- MERGE FIX (v1.5.6): Use responsive size ---
+              width: widget.size,
+              height: widget.size,
               child: CircularProgressIndicator(
                 value: _animationController.value,
                 strokeWidth: 10,
@@ -453,8 +512,9 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
             ),
             // Background circle
             Container(
-              width: 180,
-              height: 180,
+              // --- MERGE FIX (v1.5.6): Use responsive size ---
+              width: widget.size - 20,
+              height: widget.size - 20,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: primaryColor.withOpacity(0.1),
@@ -467,7 +527,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
               firstChild: Text(
                 _formatRunningTime(_secondsElapsed),
                 style: TextStyle(
-                  fontSize: 36,
+                  // --- MERGE FIX (v1.5.6): Use responsive font size ---
+                  fontSize: widget.size / 5.5,
                   fontWeight: FontWeight.bold,
                   color: primaryColor,
                   fontFamily: 'monospace',
@@ -663,8 +724,9 @@ class MilestonesPageState extends State<MilestonesPage>
                     final milestone = sortedMilestones[index];
                     // --- End of fix ---
 
-                    // --- FIX v1.4.5: Wrap in IntrinsicHeight to solve layout crash ---
-                    // --- FIX v1.5.1: Removed IntrinsicHeight to fix overflow/jank on expand
+                    // --- FIX v1.4.5: Wrapped in IntrinsicHeight
+                    // --- FIX v1.5.1: Removed IntrinsicHeight
+                    // --- FIX v1.5.5: Kept IntrinsicHeight removed, this is correct.
                     return MilestoneNode(
                       key: ValueKey('${milestone.id}-${milestone.progress}'),
                       milestone: milestone,
@@ -698,14 +760,6 @@ class SettingsPage extends StatelessWidget {
       required this.editMode,
       required this.onEditModeChanged,
       required this.allGoals});
-
-  // // --- _launchURL method (unchanged) ---
-  // Future<void> _launchURL(String urlString) async {
-  //   final Uri url = Uri.parse(urlString);
-  //   if (!await launchUrl(url)) {
-  //     throw Exception('Could not launch $url');
-  //   }
-  // }
 
   @override
   Widget build(BuildContext context) {
@@ -1368,80 +1422,84 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20.0),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("New Milestone",
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                  labelText: 'Title', border: OutlineInputBorder()),
-              validator: (value) => value == null || value.isEmpty
-                  ? 'Please enter a title'
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _tasksController,
-              decoration: const InputDecoration(
-                  labelText: 'Tasks (one per line)',
-                  border: OutlineInputBorder()),
-              maxLines: 3,
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: _isSuggestingTasks
-                  ? const Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
-                    )
-                  : TextButton.icon(
-                      onPressed: _getTaskSuggestions,
-                      icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                      label: const Text("Suggest Tasks"),
-                    ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _selectedDate == null
-                        ? 'No date chosen'
-                        : 'Due: ${DateFormat.yMMMd().format(_selectedDate!)}',
-                    style: TextStyle(
-                      color: _selectedDate == null && _dateSubmittedOnce
-                          ? Colors.red
-                          : null,
+    // --- MERGE FIX (v1.5.6): Wrap in SingleChildScrollView ---
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("New Milestone",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                    labelText: 'Title', border: OutlineInputBorder()),
+                validator: (value) => value == null || value.isEmpty
+                    ? 'Please enter a title'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _tasksController,
+                decoration: const InputDecoration(
+                    labelText: 'Tasks (one per line)',
+                    border: OutlineInputBorder()),
+                maxLines: 3,
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _isSuggestingTasks
+                    ? const Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
+                    : TextButton.icon(
+                        onPressed: _getTaskSuggestions,
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                        label: const Text("Suggest Tasks"),
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _selectedDate == null
+                          ? 'No date chosen'
+                          : 'Due: ${DateFormat.yMMMd().format(_selectedDate!)}',
+                      style: TextStyle(
+                        color: _selectedDate == null && _dateSubmittedOnce
+                            ? Colors.red
+                            : null,
+                      ),
                     ),
                   ),
-                ),
-                TextButton(
-                    onPressed: _pickDate, child: const Text('Choose Date')),
-              ],
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _submit,
-                child: const Text('Add Milestone'),
+                  TextButton(
+                      onPressed: _pickDate, child: const Text('Choose Date')),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _submit,
+                  child: const Text('Add Milestone'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+    // --- END OF MERGE FIX ---
   }
 }
 
@@ -1606,6 +1664,7 @@ class GoalDetailsPage extends StatelessWidget {
           // ---
           // --- FIX v1.5.4: Replaced Column with ...spread operator ---
           // This prevents the "infinite height" layout crash.
+          // This is the correct v1.5.5 implementation.
           // ---
           if (goal.milestones.isEmpty)
             const Center(
@@ -1686,6 +1745,7 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   bool _isLoading = true;
   bool _hasExactAlarmPermission = false;
 
+  // --- v1.5.5 Change: Use FlutterSecureStorage ---
   final _storage = const FlutterSecureStorage();
 
   @override
@@ -1712,15 +1772,18 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   }
 
   Future<void> _loadSettings() async {
+    // --- v1.5.5 Change: Use FlutterSecureStorage ---
     final notificationCountString =
         await _storage.read(key: 'notification_count');
     final timeStringsJson = await _storage.read(key: 'notification_times');
 
     setState(() {
-      _notificationCount =
-          notificationCountString != null ? int.parse(notificationCountString) : 1;
+      _notificationCount = notificationCountString != null
+          ? int.parse(notificationCountString)
+          : 1;
       if (timeStringsJson != null) {
-        final List<String> timeStrings = List<String>.from(json.decode(timeStringsJson));
+        final List<String> timeStrings =
+            List<String>.from(json.decode(timeStringsJson));
         _notificationTimes = timeStrings.map((t) {
           final parts = t.split(':');
           return TimeOfDay(
@@ -1734,11 +1797,13 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   }
 
   Future<void> _saveSettings() async {
+    // --- v1.5.5 Change: Use FlutterSecureStorage ---
     await _storage.write(
         key: 'notification_count', value: _notificationCount.toString());
     final timeStrings =
         _notificationTimes.map((t) => '${t.hour}:${t.minute}').toList();
-    await _storage.write(key: 'notification_times', value: json.encode(timeStrings));
+    await _storage.write(
+        key: 'notification_times', value: json.encode(timeStrings));
   }
 
   void _updateAndSaveChanges() async {
@@ -1750,10 +1815,12 @@ class NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       return;
     }
 
+    // --- v1.5.5 Change: Use FlutterSecureStorage ---
     final oldNotificationCountString =
         await _storage.read(key: 'notification_count');
-    final int oldNotificationCount =
-        oldNotificationCountString != null ? int.parse(oldNotificationCountString) : 0;
+    final int oldNotificationCount = oldNotificationCountString != null
+        ? int.parse(oldNotificationCountString)
+        : 0;
 
     for (int i = 0; i < oldNotificationCount; i++) {
       await NotificationService().cancelNotification(i);
