@@ -1,7 +1,10 @@
 /*
  * @author Mosses
- * @version 1.5.6
+ * @version 1.5.7
  * --- CHANGELOG ---
+ * v1.5.7:
+ * - [FEAT] Added Google-style account switching to SettingsPage AppBar.
+ * - [FEAT] Added 'Currently logged in' ListTile to SettingsPage.
  * v1.5.6:
  * - [FIX] Merged v1.5.5 changes (Stack layout, SecureStorage) with previous overflow fixes.
  * - [FIX] Re-applied responsive/scrolling layout to HomePage (from v1.5.2).
@@ -24,6 +27,7 @@ import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import FirebaseAuth
 import './models.dart';
 import './services.dart';
 import './reports_page.dart';
@@ -745,7 +749,7 @@ class MilestonesPageState extends State<MilestonesPage>
   }
 }
 
-// --- SettingsPage (MODIFIED) ---
+// --- SettingsPage (MODIFIED v1.5.7) ---
 class SettingsPage extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback toggleDarkMode;
@@ -764,6 +768,7 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context, listen: false);
+    final user = FirebaseAuth.instance.currentUser; // <-- ADDED
 
     // Find the active goal to pass to ReportsPage
     Goal? activeGoal;
@@ -774,9 +779,58 @@ class SettingsPage extends StatelessWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(
+        title: const Text('Settings'),
+        // --- ADDED 'actions' BLOCK ---
+        actions: [
+          if (user != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 16.0),
+              // Use InkWell for a nice splash effect on tap
+              child: InkWell(
+                onTap: () {
+                  // --- THIS IS THE MAGIC ---
+                  // Call signInWithGoogle to trigger the account picker.
+                  // This is the "switch account" action.
+                  Provider.of<AuthService>(context, listen: false)
+                      .signInWithGoogle();
+                },
+                customBorder: const CircleBorder(),
+                child: CircleAvatar(
+                  radius: 18,
+                  // Show the user's photo if they have one
+                  backgroundImage: user.photoURL != null
+                      ? NetworkImage(user.photoURL!)
+                      : null,
+                  // If no photo, show the first letter of their email
+                  child: user.photoURL == null
+                      ? Text(
+                          user.email?.substring(0, 1).toUpperCase() ?? "U",
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        )
+                      : null,
+                ),
+              ),
+            ),
+        ],
+        // --- END OF ADDED BLOCK ---
+      ),
       body: ListView(
         children: [
+          // --- ADDED THIS LISTTILE ---
+          if (user != null)
+            ListTile(
+              title: Text(user.email ?? "No Email"),
+              subtitle: const Text("Currently logged in"),
+              leading: const Icon(Icons.account_circle_outlined),
+              // Optional: You could make this tap do the same as the icon
+              // onTap: () {
+              //   Provider.of<AuthService>(context, listen: false)
+              //       .signInWithGoogle();
+              // },
+            ),
+          // --- END OF ADDED BLOCK ---
+
           // --- MOD: "Upgrade to Pro" Tile ---
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
