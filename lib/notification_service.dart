@@ -122,7 +122,8 @@ class NotificationService {
   // --- FIX: Add method to get launch details ---
   /// Checks if the app was launched from a notification.
   /// This is needed in main.dart's initState.
-  Future<NotificationAppLaunchDetails?> getNotificationAppLaunchDetails() async {
+  Future<NotificationAppLaunchDetails?>
+      getNotificationAppLaunchDetails() async {
     return await _flutterLocalNotificationsPlugin
         .getNotificationAppLaunchDetails();
   }
@@ -228,7 +229,8 @@ class NotificationService {
       'focus_channel_id',
       'Focus Mode',
       channelDescription: 'Notification shown while in a focus session.',
-      importance: Importance.low, // --- MODIFIED: Low importance so it's less intrusive
+      importance:
+          Importance.low, // --- MODIFIED: Low importance so it's less intrusive
       priority: Priority.low,
       ongoing: true, // --- This makes it undismissable
       autoCancel: false, // --- This prevents it from being cancelled on tap

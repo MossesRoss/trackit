@@ -187,6 +187,8 @@ class AuthService with ChangeNotifier {
 
   Future<void> signInWithGoogle() async {
     try {
+      // --- FIX: Force account picker to always appear ---
+      await _googleSignIn.signOut();
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         return; // User cancelled the sign-in
@@ -629,8 +631,8 @@ class QuoteService {
   ];
 
   static Future<String> getQuote() async {
-    final _storage = const FlutterSecureStorage();
-    final lastIndexString = await _storage.read(key: _quoteIndexKey);
+    const storage = FlutterSecureStorage();
+    final lastIndexString = await storage.read(key: _quoteIndexKey);
     int lastIndex = -1;
     if (lastIndexString != null) {
       lastIndex = int.parse(lastIndexString);
@@ -639,7 +641,7 @@ class QuoteService {
     // Increment index and loop back to 0 if at the end
     int nextIndex = (lastIndex + 1) % _quotes.length;
 
-    await _storage.write(key: _quoteIndexKey, value: nextIndex.toString());
+    await storage.write(key: _quoteIndexKey, value: nextIndex.toString());
     return _quotes[nextIndex];
   }
 }

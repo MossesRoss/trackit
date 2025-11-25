@@ -110,8 +110,8 @@ Future<void> main() async {
 
   // --- FIX: Add one-time migration to clear the old, non-user-specific cache ---
   try {
-    const _storage = FlutterSecureStorage();
-    await _storage.delete(key: _oldLocalCacheKey);
+    const storage = FlutterSecureStorage();
+    await storage.delete(key: _oldLocalCacheKey);
     debugPrint("MIGRATION: Removed old, non-user-specific goals cache.");
   } catch (e) {
     debugPrint("Error during one-time cache migration: $e");
@@ -405,7 +405,8 @@ class _MainPageState extends State<MainPage> {
             "[DEBUG] _loadGoalsAndProcessLaunch: Widget unmounted during load. Aborting.");
         return; // Check if widget is still mounted
       }
-      debugPrint("[DEBUG] _loadGoalsAndProcessLaunch: Loaded ${goals.length} goals.");
+      debugPrint(
+          "[DEBUG] _loadGoalsAndProcessLaunch: Loaded ${goals.length} goals.");
 
       _allGoals = goals;
       _updateMilestoneLockStatus(); // Update lock status *before* recovery logic
@@ -494,7 +495,8 @@ class _MainPageState extends State<MainPage> {
 
     // --- 5. Set loading to false
     if (mounted) {
-      debugPrint("[DEBUG] _loadGoalsAndProcessLaunch: Setting isLoading to false.");
+      debugPrint(
+          "[DEBUG] _loadGoalsAndProcessLaunch: Setting isLoading to false.");
       setState(() {
         _isLoading = false;
       });
@@ -1079,7 +1081,7 @@ class _MainPageState extends State<MainPage> {
         padding: const EdgeInsets.symmetric(vertical: 16.0),
       ).copyWith(
         // Use .copyWith to override overlay color for a nice press effect
-        overlayColor: MaterialStateProperty.all(color.shade200),
+        overlayColor: WidgetStateProperty.all(color.shade200),
       ),
       child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold)),
       // --- MOSSES: FIX: Added async/await ---

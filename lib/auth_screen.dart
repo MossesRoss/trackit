@@ -77,7 +77,12 @@ class _AuthScreenState extends State<AuthScreen> {
             children: [
               // FIX: Added App Icon and Name for better branding on the auth screen.
               // Make sure you have an icon at 'assets/icon.png'
-              Image.asset('assets/icon.png', height: 80, errorBuilder: (context, error, stackTrace) => const Icon(Icons.track_changes, size: 80, color: Colors.white)),
+              Image.asset('assets/icon.png',
+                  height: 80,
+                  errorBuilder: (context, error, stackTrace) => const Icon(
+                      Icons.track_changes,
+                      size: 80,
+                      color: Colors.white)),
               const SizedBox(height: 8),
               const Text(
                 'Track It',
@@ -99,8 +104,8 @@ class _AuthScreenState extends State<AuthScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           TextFormField(
-                            decoration:
-                                const InputDecoration(labelText: 'Email Address'),
+                            decoration: const InputDecoration(
+                                labelText: 'Email Address'),
                             keyboardType: TextInputType.emailAddress,
                             autocorrect: false,
                             textCapitalization: TextCapitalization.none,
@@ -158,7 +163,8 @@ class _AuthScreenState extends State<AuthScreen> {
                               children: [
                                 Expanded(child: Divider()),
                                 Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8.0),
+                                  padding:
+                                      EdgeInsets.symmetric(horizontal: 8.0),
                                   child: Text('OR'),
                                 ),
                                 Expanded(child: Divider()),
@@ -167,7 +173,9 @@ class _AuthScreenState extends State<AuthScreen> {
                             const SizedBox(height: 10),
                             // NEW: Google Sign In Button
                             ElevatedButton.icon(
-                              icon: Image.asset('assets/google_logo.png', height: 24.0), // You need to add a google logo to your assets
+                              icon: Image.asset('assets/google_logo.png',
+                                  height:
+                                      24.0), // You need to add a google logo to your assets
                               label: const Text('Continue with Google'),
                               onPressed: _googleSignIn,
                               style: ElevatedButton.styleFrom(
@@ -191,4 +199,3 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 }
-

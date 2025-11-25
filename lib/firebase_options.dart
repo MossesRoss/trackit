@@ -65,8 +65,10 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1059947667065',
     projectId: 'trackit-007',
     storageBucket: 'trackit-007.firebasestorage.app',
-    androidClientId: '1059947667065-bg60rck2j94uhdghcul3reonppanln91.apps.googleusercontent.com',
-    iosClientId: '1059947667065-lma0nhi0de2r7mei0fjrqr2476viebna.apps.googleusercontent.com',
+    androidClientId:
+        '1059947667065-bg60rck2j94uhdghcul3reonppanln91.apps.googleusercontent.com',
+    iosClientId:
+        '1059947667065-lma0nhi0de2r7mei0fjrqr2476viebna.apps.googleusercontent.com',
     iosBundleId: 'com.example.trackit',
   );
 
@@ -76,9 +78,10 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1059947667065',
     projectId: 'trackit-007',
     storageBucket: 'trackit-007.firebasestorage.app',
-    androidClientId: '1059947667065-bg60rck2j94uhdghcul3reonppanln91.apps.googleusercontent.com',
-    iosClientId: '1059947667065-cs4vak2d44kg9c029tao8kj1p3sn54rh.apps.googleusercontent.com',
+    androidClientId:
+        '1059947667065-bg60rck2j94uhdghcul3reonppanln91.apps.googleusercontent.com',
+    iosClientId:
+        '1059947667065-cs4vak2d44kg9c029tao8kj1p3sn54rh.apps.googleusercontent.com',
     iosBundleId: 'com.mosses.trackit',
   );
-
 }

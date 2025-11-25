@@ -109,16 +109,16 @@ class _HomePageState extends State<HomePage> {
     // --- END NEW FIX ---
 
     // --- v1.5.5 Change: Use FlutterSecureStorage ---
-    final _storage = const FlutterSecureStorage();
+    const storage = FlutterSecureStorage();
     final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String? currentMilestoneId = _nextMilestone?.id;
 
     // Check cache first
-    final String? cachedDate = await _storage.read(key: 'suggestion_cache_date');
+    final String? cachedDate = await storage.read(key: 'suggestion_cache_date');
     final String? cachedMilestoneId =
-        await _storage.read(key: 'suggestion_cache_milestone_id');
+        await storage.read(key: 'suggestion_cache_milestone_id');
     final String? cachedSuggestion =
-        await _storage.read(key: 'suggestion_cache_content');
+        await storage.read(key: 'suggestion_cache_content');
 
     if (cachedDate == currentDate &&
         cachedMilestoneId == currentMilestoneId &&
@@ -141,11 +141,11 @@ class _HomePageState extends State<HomePage> {
       if (result.suggestion != null) {
         textToShow = result.suggestion!;
         // Save to cache
-        await _storage.write(key: 'suggestion_cache_date', value: currentDate);
-        await _storage.write(
+        await storage.write(key: 'suggestion_cache_date', value: currentDate);
+        await storage.write(
             key: 'suggestion_cache_milestone_id',
             value: currentMilestoneId ?? '');
-        await _storage.write(key: 'suggestion_cache_content', value: textToShow);
+        await storage.write(key: 'suggestion_cache_content', value: textToShow);
       } else {
         // Handle errors and get fallback
         if (result.error == "NO_API_KEY") {
@@ -342,9 +342,9 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     _animationController.value = 1.5;
 
     // --- v1.5.5 Change: Use FlutterSecureStorage ---
-    final _storage = const FlutterSecureStorage();
-    await _storage.delete(key: kRecoveryTimeKey);
-    await _storage.delete(key: kRecoveryMilestoneKey);
+    const storage = FlutterSecureStorage();
+    await storage.delete(key: kRecoveryTimeKey);
+    await storage.delete(key: kRecoveryMilestoneKey);
     debugPrint("Timer started. Cleared old recovery keys.");
 
     NotificationService().showFocusNotification(
@@ -363,9 +363,8 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
         // We use .then() (fire-and-forget) so we don't 'await'
         // inside a periodic timer, which is bad practice.
         // --- v1.5.5 Change: Use FlutterSecureStorage ---
-        _storage.write(
-            key: kRecoveryTimeKey, value: _secondsElapsed.toString());
-        _storage.write(
+        storage.write(key: kRecoveryTimeKey, value: _secondsElapsed.toString());
+        storage.write(
             key: kRecoveryMilestoneKey, value: widget.nextMilestone.id);
         debugPrint("Timer recovery data saved: $_secondsElapsed seconds");
       }
@@ -378,9 +377,9 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
 
     // Clear the recovery keys FIRST.
     // --- v1.5.5 Change: Use FlutterSecureStorage ---
-    final _storage = const FlutterSecureStorage();
-    await _storage.delete(key: kRecoveryTimeKey);
-    await _storage.delete(key: kRecoveryMilestoneKey);
+    const storage = FlutterSecureStorage();
+    await storage.delete(key: kRecoveryTimeKey);
+    await storage.delete(key: kRecoveryMilestoneKey);
     debugPrint("Timer stopped. Cleared recovery keys.");
 
     if (_secondsElapsed > 0) {
@@ -788,12 +787,22 @@ class SettingsPage extends StatelessWidget {
               padding: const EdgeInsets.only(right: 16.0),
               // Use InkWell for a nice splash effect on tap
               child: InkWell(
-                onTap: () {
+                onLongPress: () {
                   // --- THIS IS THE MAGIC ---
                   // Call signInWithGoogle to trigger the account picker.
                   // This is the "switch account" action.
-                  Provider.of<AuthService>(context, listen: false)
-                      .signInWithGoogle();
+                  try {
+                    Provider.of<AuthService>(context, listen: false)
+                        .signInWithGoogle();
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        backgroundColor: Colors.red,
+                        content:
+                            Text("Error switching accounts. Please try again."),
+                      ),
+                    );
+                  }
                 },
                 customBorder: const CircleBorder(),
                 child: CircleAvatar(
@@ -1337,7 +1346,7 @@ class LinePainter extends CustomPainter {
     final textPainter = TextPainter(
       textDirection: ui.TextDirection.ltr, // <-- FIX: Used 'ui.' prefix
     );
-    final iconColor = Colors.white; // Icon is always white
+    const iconColor = Colors.white; // Icon is always white
 
     textPainter.text = TextSpan(
       text: String.fromCharCode(icon.codePoint),
@@ -1509,7 +1518,7 @@ class _AddMilestoneFormState extends State<AddMilestoneForm> {
                 alignment: Alignment.centerRight,
                 child: _isSuggestingTasks
                     ? const Padding(
-                        padding: const EdgeInsets.all(8.0),
+                        padding: EdgeInsets.all(8.0),
                         child: SizedBox(
                             height: 20,
                             width: 20,

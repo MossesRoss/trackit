@@ -74,7 +74,8 @@ class Checkpoint {
   final String id;
   final String title;
 
-  Checkpoint({required this.title, String? id}) : id = id ?? UniqueKey().toString();
+  Checkpoint({required this.title, String? id})
+      : id = id ?? UniqueKey().toString();
 
   Map<String, dynamic> toJson() => {'id': id, 'title': title};
 
@@ -105,8 +106,10 @@ class Goal {
         createdAt = createdAt ?? DateTime.now(),
         milestones = List<Milestone>.from(milestones);
 
-  int get totalTasks => milestones.fold(0, (sum, m) => sum + m.checkpoints.length);
-  int get completedTasks => milestones.fold(0, (sum, m) => sum + m.completedCheckpointIds.length);
+  int get totalTasks =>
+      milestones.fold(0, (sum, m) => sum + m.checkpoints.length);
+  int get completedTasks =>
+      milestones.fold(0, (sum, m) => sum + m.completedCheckpointIds.length);
 
   // --- FIX: totalTimeSpent now computes from the new milestone log ---
   Duration get totalTimeSpent =>
@@ -222,8 +225,7 @@ class Milestone {
       deadline: DateTime.parse(json['deadline']),
       checkpoints: List<Checkpoint>.from(
           (json['checkpoints'] as List).map((c) => Checkpoint.fromJson(c))),
-      completedCheckpointIds:
-          List<String>.from(json['completedCheckpointIds']),
+      completedCheckpointIds: List<String>.from(json['completedCheckpointIds']),
       // --- FIX: Remove old fields from factory ---
       // timeSpent: Duration(seconds: json['timeSpent'] ?? 0),
       // lastWorkedOn: json['lastWorkedOn'] != null

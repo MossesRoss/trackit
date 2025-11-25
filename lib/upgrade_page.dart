@@ -101,14 +101,12 @@ class _UpgradePageState extends State<UpgradePage> {
                 const _BenefitTile(
                   icon: Icons.bar_chart_rounded,
                   title: "Advanced Data Visualization",
-                  subtitle:
-                      "See beautiful charts of your progress and habits.",
+                  subtitle: "See beautiful charts of your progress and habits.",
                 ),
                 const _BenefitTile(
                   icon: Icons.schedule_rounded,
                   title: "AI-Powered Goal Scheduling",
-                  subtitle:
-                      "Let AI build the perfect milestone plan for you.",
+                  subtitle: "Let AI build the perfect milestone plan for you.",
                 ),
                 const SizedBox(height: 32),
 
@@ -133,7 +131,8 @@ class _UpgradePageState extends State<UpgradePage> {
                 // --- MOD: Payment Instructions moved into a collapsible Card ---
                 Card(
                   elevation: 0,
-                  clipBehavior: Clip.antiAlias, // Ensures ExpansionTile respects card's shape
+                  clipBehavior: Clip
+                      .antiAlias, // Ensures ExpansionTile respects card's shape
                   color: isDarkMode
                       ? theme.colorScheme.surfaceContainerHighest
                       : theme.colorScheme.surface,
@@ -322,5 +321,3 @@ class _BenefitTile extends StatelessWidget {
     );
   }
 }
-
-
