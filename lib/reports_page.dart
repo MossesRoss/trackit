@@ -521,7 +521,7 @@ class ArchivedGoalCard extends StatelessWidget {
             )),
         subtitle: Text(
           isAchieved ? 'Achieved!' : 'Given Up',
-          style: TextStyle(color: contentColor.withOpacity(0.8)), // <-- FIX
+          style: TextStyle(color: contentColor.withAlpha(204)), // <-- FIX
         ),
       ),
     );

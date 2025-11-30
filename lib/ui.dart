@@ -34,6 +34,7 @@ import './reports_page.dart';
 import './notification_service.dart';
 import './guide_page.dart';
 import './upgrade_page.dart';
+import 'widgets/sexy_chart.dart';
 
 // --- Keys for SharedPreferences Timer Recovery ---
 const String kRecoveryTimeKey = 'recovery_time_seconds';
@@ -45,236 +46,186 @@ class HomePage extends StatefulWidget {
   final Function(String, Duration) onTimeAdd;
   final VoidCallback onGiveUp;
 
-  const HomePage(
-      {super.key,
-      this.activeGoal,
-      required this.onSetGoal,
-      required this.onTimeAdd,
-      required this.onGiveUp});
+  const HomePage({
+    super.key,
+    this.activeGoal,
+    required this.onSetGoal,
+    required this.onTimeAdd,
+    required this.onGiveUp,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  String _suggestion = "";
-  bool _isLoading = true;
-
-  Milestone? get _nextMilestone {
-    if (widget.activeGoal == null) return null;
-    for (final milestone in widget.activeGoal!.milestones) {
-      if (!milestone.isCompleted) {
-        return milestone;
-      }
-    }
-    return null;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchSuggestion();
-  }
-
-  // --- NEW: Add didUpdateWidget to handle goal changes ---
-  @override
-  void didUpdateWidget(covariant HomePage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // If the active goal ID has changed, fetch a new suggestion
-    if (oldWidget.activeGoal?.id != widget.activeGoal?.id) {
-      // Use postFrameCallback to avoid setState during build
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _fetchSuggestion();
-        }
-      });
-    }
-  }
-
-  Future<void> _fetchSuggestion() async {
-    setState(() => _isLoading = true);
-
-    // --- NEW FIX ---
-    // If there's no *next* milestone (either goal is new or finished),
-    // we don't need to show a suggestion tip. The main UI handles this.
-    if (_nextMilestone == null) {
-      if (mounted) {
-        setState(() {
-          _suggestion = ""; // Clear any old suggestion
-          _isLoading = false;
-        });
-      }
-      return; // Don't proceed to fetch
-    }
-    // --- END NEW FIX ---
-
-    // --- v1.5.5 Change: Use FlutterSecureStorage ---
-    const storage = FlutterSecureStorage();
-    final String currentDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final String? currentMilestoneId = _nextMilestone?.id;
-
-    // Check cache first
-    final String? cachedDate = await storage.read(key: 'suggestion_cache_date');
-    final String? cachedMilestoneId =
-        await storage.read(key: 'suggestion_cache_milestone_id');
-    final String? cachedSuggestion =
-        await storage.read(key: 'suggestion_cache_content');
-
-    if (cachedDate == currentDate &&
-        cachedMilestoneId == currentMilestoneId &&
-        cachedSuggestion != null) {
-      if (mounted) {
-        setState(() {
-          _suggestion = cachedSuggestion;
-          _isLoading = false;
-        });
-      }
-      return; // Use cached data
-    }
-
-    // No valid cache, fetch new suggestion
-    final result = await SuggestionService.getSuggestion(
-        widget.activeGoal, _nextMilestone);
-
-    if (mounted) {
-      String textToShow;
-      if (result.suggestion != null) {
-        textToShow = result.suggestion!;
-        // Save to cache
-        await storage.write(key: 'suggestion_cache_date', value: currentDate);
-        await storage.write(
-            key: 'suggestion_cache_milestone_id',
-            value: currentMilestoneId ?? '');
-        await storage.write(key: 'suggestion_cache_content', value: textToShow);
-      } else {
-        // Handle errors and get fallback
-        if (result.error == "NO_API_KEY") {
-          // Updated error message to be more helpful
-          textToShow =
-              "AI features are offline. (Dev: Check _appsScriptUrl in services.dart)";
-          debugPrint("CRITICAL: _appsScriptUrl is not set in services.dart");
-        } else {
-          // API error or network error, get a quote
-          textToShow = await QuoteService.getQuote();
-        }
-      }
-
-      setState(() {
-        _suggestion = textToShow;
-        _isLoading = false;
-      });
-    }
-  }
-
-  // --- MERGE FIX (v1.5.6): Add helper widget for responsive layout ---
-  Widget _buildGoalDisplay(
-      bool isPortrait, double timerSize, double spacerHeight) {
-    // 1. Handle empty/completed goals first
-    if (widget.activeGoal!.milestones.isEmpty) {
-      return const Center(
-        child: Text(
-          "Goal set! Go to the Milestones page to add your first task.",
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
-        ),
-      );
-    }
-    if (_nextMilestone == null) {
-      return const Center(
-        child: Text(
-          "All milestones complete! 🎉",
-          style: TextStyle(fontSize: 18),
-        ),
-      );
-    }
-
-    // 2. Build the individual components
-    final Widget timerWidget = GoalTimerCircle(
-      key: ValueKey(widget.activeGoal!.totalTimeSpent.inSeconds),
-      goal: widget.activeGoal!,
-      nextMilestone: _nextMilestone!,
-      onTimeAdd: widget.onTimeAdd,
-      size: timerSize, // <-- Pass responsive size
-    );
-
-    final Widget suggestionWidget = _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : Text(
-            _suggestion,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 16,
-                fontStyle: FontStyle.italic,
-                color: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.color
-                    ?.withAlpha((255 * 0.8).round())),
-          );
-
-    // 3. Return layout based on orientation
-    if (isPortrait) {
-      // --- PORTRAIT LAYOUT ---
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(height: spacerHeight),
-          timerWidget,
-          SizedBox(height: spacerHeight),
-          suggestionWidget,
-        ],
-      );
-    } else {
-      // --- LANDSCAPE LAYOUT ---
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          timerWidget,
-          SizedBox(width: spacerHeight * 2), // Use responsive spacing
-          Flexible(
-            child: suggestionWidget,
-          ),
-        ],
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.activeGoal?.title ?? 'Track It'),
-        actions: [
-          if (widget.activeGoal != null)
-            IconButton(
-              icon: const Icon(Icons.outlined_flag_rounded),
-              tooltip: 'Give Up Goal',
-              onPressed: widget.onGiveUp,
-            ),
-        ],
-      ),
-      // --- MERGE FIX (v1.5.6): Re-apply OrientationBuilder and SingleChildScrollView ---
-      body: OrientationBuilder(
-        builder: (context, orientation) {
-          final isPortrait = orientation == Orientation.portrait;
-          final double timerSize = isPortrait ? 200.0 : 140.0;
-          final double spacerHeight = isPortrait ? 40.0 : 20.0;
+      backgroundColor: const Color(0xFFF5F7FA), // Premium Grey
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. HEADER
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Dashboard',
+                          style: TextStyle(color: Colors.grey, fontSize: 14)),
+                      Text('Overview',
+                          style: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.person, color: Colors.blueAccent),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 25),
 
-          return SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: widget.activeGoal == null
-                    ? GoalSetterCard(onSetGoal: widget.onSetGoal)
-                    : _buildGoalDisplay(isPortrait, timerSize, spacerHeight),
+              // 2. CHART SECTION
+              const Text('Weekly Consistency',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 15),
+              const SexyProgressChart(), // The new widget
+              const SizedBox(height: 30),
+
+              // 3. GOALS SECTION
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Your Goals',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon:
+                        const Icon(Icons.add_circle, color: Colors.blueAccent),
+                    onPressed: () {
+                      // Navigate to Add Goal (Assuming AddGoalPage exists in your project)
+                      // Navigator.push(context, MaterialPageRoute(builder: (context) => const AddGoalPage()));
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // 4. GOAL LIST (Modernized)
+              StreamBuilder<List<Goal>>(
+                stream: Provider.of<FirestoreService>(context, listen: false)
+                    .getGoalsStream(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  }
+                  final goals = snapshot.data ?? [];
+                  if (goals.isEmpty) {
+                    return _buildEmptyState();
+                  }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: goals.length,
+                    separatorBuilder: (ctx, i) => const SizedBox(height: 15),
+                    itemBuilder: (ctx, i) {
+                      final goal = goals[i];
+                      return _buildGoalCard(context, goal);
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      padding: const EdgeInsets.all(40),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(20)),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(Icons.flag_outlined, size: 40, color: Colors.grey[300]),
+            const SizedBox(height: 10),
+            const Text("No active goals."),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoalCard(BuildContext context, dynamic goal) {
+    // Assuming 'goal' has a title. Adjust 'progress' logic if your model supports it.
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => GoalDetailsPage(goal: goal)),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withAlpha(10),
+                blurRadius: 15,
+                offset: const Offset(0, 5))
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent.withAlpha(26),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Icon(Icons.star_rounded, color: Colors.blueAccent),
+            ),
+            const SizedBox(width: 15),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(goal.title ?? "Untitled",
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: 0.5, // Placeholder for actual progress
+                    backgroundColor: Colors.grey[100],
+                    color: Colors.blueAccent,
+                    minHeight: 6,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ],
               ),
             ),
-          );
-        },
+            const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+          ],
+        ),
       ),
-      // --- END OF MERGE FIX ---
     );
   }
 }
@@ -462,7 +413,7 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
     final TextStyle unitStyle = TextStyle(
       fontSize: fontSize,
       fontWeight: FontWeight.normal,
-      color: primaryColor.withOpacity(0.5), // <-- Reduced opacity
+      color: primaryColor.withAlpha(128), // <-- Reduced opacity
     );
 
     final List<TextSpan> spans = [];
@@ -520,7 +471,7 @@ class _GoalTimerCircleState extends State<GoalTimerCircle>
               height: widget.size - 20,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: primaryColor.withOpacity(0.1),
+                color: primaryColor.withAlpha(26),
               ),
             ),
             // AnimatedCrossFade for text
@@ -862,7 +813,7 @@ class SettingsPage extends StatelessWidget {
                   color: Theme.of(context)
                       .colorScheme
                       .onPrimaryContainer
-                      .withOpacity(0.8),
+                      .withAlpha(204),
                 ),
               ),
               // --- MOD: Changed onTap to navigate to the new page ---
@@ -1148,15 +1099,13 @@ class MilestoneNode extends StatelessWidget {
     // --- FIX: Use theme-aware colors for dark mode ---
     final Color lightColor;
     if (milestone.isCompleted) {
-      lightColor = Colors.green.withOpacity(0.1);
+      lightColor = Colors.green.withAlpha(26);
     } else if (milestone.isUnlocked) {
-      lightColor = Theme.of(context).colorScheme.primary.withOpacity(0.1);
+      lightColor = Theme.of(context).colorScheme.primary.withAlpha(26);
     } else {
       // FIX: Replaced deprecated .surfaceVariant with .surfaceContainerHighest
-      lightColor = Theme.of(context)
-          .colorScheme
-          .surfaceContainerHighest
-          .withOpacity(0.5);
+      lightColor =
+          Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(128);
     }
 
     final Color? subtitleColor = milestone.isUnlocked
@@ -1203,7 +1152,7 @@ class MilestoneNode extends StatelessWidget {
               color: lightColor,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: primaryColor.withOpacity(0.5)),
+                side: BorderSide(color: primaryColor.withAlpha(128)),
               ),
               child: ExpansionTile(
                 enabled: milestone.isUnlocked,

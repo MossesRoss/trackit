@@ -1062,40 +1062,63 @@ class _MainPageState extends State<MainPage> {
   Widget _buildCheckinButton(
     BuildContext dialogContext,
     String text,
-    MaterialColor color, // <-- FIX: Changed type from Color to MaterialColor
+    MaterialColor color,
     TaskCheckinStatus status,
     String goalId,
     String milestoneId,
     String checkpointId, {
     bool toggle = false,
   }) {
-    // --- MOSSES: CHANGED TextButton to FilledButton ---
-    return FilledButton(
-      style: FilledButton.styleFrom(
-        backgroundColor: color.shade100, // Light background
-        foregroundColor: color.shade900, // Dark text
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12), // Softer corners
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.all(6.0),
+        height: 100, // Fixed height for grid look
+        decoration: BoxDecoration(
+          color: color.shade50,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.shade100, width: 2),
         ),
-        // Make the buttons a bit taller to fill the 2x2 grid
-        padding: const EdgeInsets.symmetric(vertical: 16.0),
-      ).copyWith(
-        // Use .copyWith to override overlay color for a nice press effect
-        overlayColor: WidgetStateProperty.all(color.shade200),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () async {
+            Navigator.of(dialogContext).pop();
+            debugPrint("In-app dialog: '${status.name}' tapped.");
+            recordTaskCheckin(goalId, milestoneId, checkpointId, status);
+            if (toggle) {
+              await toggleCheckpointByIds(goalId, milestoneId, checkpointId);
+            }
+          },
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(_getIconForStatus(status), size: 32, color: color.shade700),
+              const SizedBox(height: 8),
+              Text(
+                text,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: color.shade900,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold)),
-      // --- MOSSES: FIX: Added async/await ---
-      onPressed: () async {
-        Navigator.of(dialogContext).pop(); // Close dialog
-
-        // Run the original foreground logic
-        debugPrint("In-app dialog: '${status.name}' tapped.");
-        recordTaskCheckin(goalId, milestoneId, checkpointId, status);
-        if (toggle) {
-          // Use `await` to ensure it completes
-          await toggleCheckpointByIds(goalId, milestoneId, checkpointId);
-        }
-      },
     );
+  }
+
+  // Add this helper if it doesn't exist in your class
+  IconData _getIconForStatus(TaskCheckinStatus status) {
+    switch (status) {
+      case TaskCheckinStatus.done:
+        return Icons.check_circle;
+      case TaskCheckinStatus.wontDo:
+        return Icons.cancel;
+      case TaskCheckinStatus.doing:
+        return Icons.directions_run;
+      case TaskCheckinStatus.willDo:
+        return Icons.calendar_today;
+    }
   }
 }
