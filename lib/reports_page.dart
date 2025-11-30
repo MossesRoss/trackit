@@ -24,6 +24,7 @@ import 'package:provider/provider.dart';
 // FIX: Added missing import for data models.
 import './models.dart';
 import './services.dart';
+import './widgets/sexy_chart.dart';
 
 // --- PERFORMANCE FIX: Removed LayoutBuilder ---
 class ProgressPieChart extends StatelessWidget {
@@ -272,9 +273,8 @@ class OverallReportView extends StatelessWidget {
                     // ),
                     // --- STYLE: Remove extra space ---
                     // const SizedBox(height: 24),
-                    ProgressPieChart(
-                      completed: activeGoal.completedTasks,
-                      total: activeGoal.totalTasks,
+                    SexyProgressChart(
+                      isDark: Theme.of(context).brightness == Brightness.dark,
                     ),
                   ],
                 ),
