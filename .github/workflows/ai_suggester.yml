@@ -1,4 +1,4 @@
-=name: AI Commit Analyzer
+name: AI Commit Analyzer
 on:
   push:
     branches:
