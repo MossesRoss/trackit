@@ -1,4 +1,4 @@
-name: AI Commit Analyzer
+=name: AI Commit Analyzer
 on:
   push:
     branches:
@@ -26,22 +26,22 @@ jobs:
       - name: Call Gemini API
         id: gemini_call
         env:
-          # UPDATED PROMPT: Asking for JSON output with specific fields
+          # UPDATED PROMPT: STRICT JSON instructions
           SYSTEM_PROMPT: |
             You are a senior developer. Analyze the git diff.
-            Return a JSON object with exactly two fields: "title" and "body".
+            Return a valid JSON object with exactly two fields: "title" and "body".
+            Do NOT use Markdown code blocks. Just return the raw JSON.
             
-            1. "title": A short, punchy summary of the most important change (max 50 chars). Example: "Fix Cache Invalid Logic" or "Add User Auth Middleware".
-            2. "body": A concise markdown list of the specific fixes or improvements. No fluff, no intros. Just the points.
+            1. "title": A short, technical summary of the fix. Example: "Fix Cache Invalid Logic" or "Refactor User Auth". (Max 60 chars).
+            2. "body": A concise markdown list of the specific fixes. No fluff.
             
-            If the commit is minor (typos, formatting), return: { "title": "Minor Update", "body": "No significant suggestions." }
+            If the commit is minor, return: { "title": "Minor Update", "body": "No significant suggestions." }
           RAW_DIFF: ${{ steps.get_diff.outputs.RAW_DIFF }}
         run: |
-          API_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${{ secrets.GEMINI_API_KEY }}"
-          
+          API_URL="[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$){{ secrets.GEMINI_API_KEY }}"
           COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
           
-          # We request JSON responseMimeType to ensure structured output
+          # Construct JSON Payload
           JSON_PAYLOAD=$(jq -n \
             --arg sp "$SYSTEM_PROMPT" \
             --arg commit_sha "$COMMIT_SHA_SHORT" \
@@ -53,22 +53,27 @@ jobs:
             }'
           )
           
-          # 1. Call API
-          API_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d "${JSON_PAYLOAD}" "${API_URL}")
+          # Call API - Remove -s to see curl errors if any
+          echo "Sending request to Gemini..."
+          API_RESPONSE=$(curl -X POST -H "Content-Type: application/json" -d "${JSON_PAYLOAD}" "${API_URL}")
           
-          # 2. Extract the model's inner JSON text (which contains title and body)
-          MODEL_OUTPUT_JSON=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
+          # DEBUG: Print raw response to logs to catch errors
+          echo "--- GEMINI RAW RESPONSE ---"
+          echo "$API_RESPONSE"
+          echo "---------------------------"
           
-          if [ -z "$MODEL_OUTPUT_JSON" ]; then
-            echo "Error: Empty response from AI"
+          # Clean output: Remove markdown code blocks if present (```json ... ```)
+          CLEAN_JSON=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty' | sed 's/^```json//g' | sed 's/^```//g')
+          
+          if [ -z "$CLEAN_JSON" ]; then
+            echo "Error: Failed to parse valid JSON from AI response."
             exit 1
           fi
 
-          # 3. Parse the title and body from the model's JSON
-          ISSUE_TITLE=$(echo "$MODEL_OUTPUT_JSON" | jq -r '.title')
-          ISSUE_BODY=$(echo "$MODEL_OUTPUT_JSON" | jq -r '.body')
+          # Extract Title and Body
+          ISSUE_TITLE=$(echo "$CLEAN_JSON" | jq -r '.title')
+          ISSUE_BODY=$(echo "$CLEAN_JSON" | jq -r '.body')
           
-          # 4. Export to GitHub Outputs
           echo "ISSUE_TITLE=$ISSUE_TITLE" >> $GITHUB_OUTPUT
           
           echo "ISSUE_BODY<<EOF" >> $GITHUB_OUTPUT
@@ -78,7 +83,6 @@ jobs:
           echo "COMMIT_SHA_SHORT=$COMMIT_SHA_SHORT" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Issue with Suggestions
-        # Only create issue if title is not "Minor Update"
         if: steps.gemini_call.outputs.ISSUE_TITLE != 'Minor Update'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,8 +90,7 @@ jobs:
           TITLE: ${{ steps.gemini_call.outputs.ISSUE_TITLE }}
           BODY: ${{ steps.gemini_call.outputs.ISSUE_BODY }}
         run: |
-          # Use the AI-generated Title and concise Body
           gh issue create \
-            --title "$TITLE (Commit $COMMIT_SHA)" \
+            --title "$TITLE" \
             --body "$BODY" \
             --label "ai-suggestion,needs-review"
