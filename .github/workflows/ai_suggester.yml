@@ -38,7 +38,8 @@ jobs:
             If the commit is minor, return: { "title": "Minor Update", "body": "No significant suggestions." }
           RAW_DIFF: ${{ steps.get_diff.outputs.RAW_DIFF }}
         run: |
-          API_URL="[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=$){{ secrets.GEMINI_API_KEY }}"
+          # FIX: Removed markdown link syntax that was causing "bad range" error
+          API_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${{ secrets.GEMINI_API_KEY }}"
           COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
           
           # Construct JSON Payload
